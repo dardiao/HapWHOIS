@@ -41,6 +41,7 @@ const WORD_MODES = [
 
 const DEFAULT_KEYWORDS = "cloud, star, nova, peak, pixel, echo, orbit";
 const DEFAULT_AFFIXES = "web, net, app, hub, lab, tech, pro, ai, box, x, io, 01, 2, 3, 5, 7, 9";
+const DEFAULT_SUFFIXES = "com, net, org, io, cn, xyz, top, me, co";
 
 function parseList(text) {
   return text
@@ -98,6 +99,19 @@ function generateWords(keywords, affixes, modes) {
       if (modes.has("kw+num")) out.add(k + n);
       if (modes.has("num+kw")) out.add(n + k);
     }
+  }
+  return [...out];
+}
+
+function suffixList(text) {
+  return parseList(text).map((s) => s.replace(/^\.+/, ""));
+}
+
+function applySuffixes(items, suffixes, enabled) {
+  if (!enabled || !suffixes.length) return items;
+  const out = new Set();
+  for (const base of items) {
+    for (const sfx of suffixes) out.add(`${base}.${sfx}`);
   }
   return [...out];
 }
@@ -238,6 +252,8 @@ export default function App() {
   const [keywords, setKeywords] = useState(DEFAULT_KEYWORDS);
   const [affixes, setAffixes] = useState(DEFAULT_AFFIXES);
   const [wordModes, setWordModes] = useState(["alone", "kw+af", "af+kw"]);
+  const [suffixes, setSuffixes] = useState(DEFAULT_SUFFIXES);
+  const [appendSuffix, setAppendSuffix] = useState(true);
   const [minLen, setMinLen] = useState(1);
   const [maxLen, setMaxLen] = useState(3);
   const [letterTypes, setLetterTypes] = useState(["a", "0", "aa", "0a", "a0", "00"]);
@@ -340,8 +356,12 @@ export default function App() {
         if (letterTypes.includes(p.id)) total += p.count;
       }
     }
+    if (appendSuffix) {
+      const sfx = suffixList(suffixes).length;
+      total *= Math.max(1, sfx);
+    }
     return Math.min(cap, total);
-  }, [minLen, maxLen, letterTypes, cap]);
+  }, [minLen, maxLen, letterTypes, cap, appendSuffix, suffixes]);
 
   const generateWord = () => {
     const modes = new Set(wordModes);
@@ -349,9 +369,12 @@ export default function App() {
       setDictMsg("请至少勾选一种组合方式");
       return;
     }
-    const items = generateWords(parseList(keywords), parseList(affixes), modes);
+    const base = generateWords(parseList(keywords), parseList(affixes), modes);
+    const items = applySuffixes(base, suffixList(suffixes), appendSuffix);
     const added = appendEntries(items);
-    setDictMsg(`词根组合生成 ${items.length} 个，新增 ${added} 个`);
+    setDictMsg(
+      `词根组合生成 ${items.length} 个${appendSuffix ? "（含后缀）" : ""}，新增 ${added} 个`,
+    );
   };
 
   const generateLetter = () => {
@@ -364,9 +387,15 @@ export default function App() {
       setDictMsg("最短长度不能大于最长长度");
       return;
     }
-    const items = generateLetters(minLen, maxLen, checked, cap);
+    // 追加后缀时先生成全部基础名，再乘后缀后按字典序截取到上限
+    const base = generateLetters(minLen, maxLen, checked, appendSuffix ? 100000 : cap);
+    const items = applySuffixes(base, suffixList(suffixes), appendSuffix)
+      .sort()
+      .slice(0, cap);
     const added = appendEntries(items);
-    setDictMsg(`字母组合生成 ${items.length} 个，新增 ${added} 个`);
+    setDictMsg(
+      `字母组合生成 ${items.length} 个${appendSuffix ? "（含后缀）" : ""}，新增 ${added} 个`,
+    );
   };
 
   const addManual = () => {
@@ -568,6 +597,30 @@ export default function App() {
 
       {tab === "dict" && (
         <main className="content dict-content">
+          <section className="dict-section suffix-section">
+            <div className="suffix-head">
+              <h3>域名后缀（可选）</h3>
+              <label className="suffix-toggle">
+                <input
+                  type="checkbox"
+                  checked={appendSuffix}
+                  onChange={(e) => setAppendSuffix(e.target.checked)}
+                />
+                生成时自动追加后缀（如 cloud.com）
+              </label>
+            </div>
+            <input
+              className="suffix-input"
+              value={suffixes}
+              onChange={(e) => setSuffixes(e.target.value)}
+              placeholder="com, net, org, io, cn …"
+              spellCheck={false}
+            />
+            <p className="desc">
+              生成结果 = 基础名 × 勾选后缀；不勾选「追加后缀」则只生成基础名
+            </p>
+          </section>
+
           <div className="dict-grid">
             <section className="dict-section">
               <h3>手动输入 / 导入</h3>
@@ -743,4 +796,3 @@ export default function App() {
     </div>
   );
 }
-
