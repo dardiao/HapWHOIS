@@ -90,6 +90,17 @@ async fn lookup(domain: String, use_dns_discovery: bool) -> Result<LookupResult,
     })
 }
 
+#[tauri::command]
+fn write_dict_file(path: String, content: String) -> Result<String, String> {
+    std::fs::write(&path, content).map_err(|e| format!("写入文件失败: {e}"))?;
+    Ok(path)
+}
+
+#[tauri::command]
+fn read_dict_file(path: String) -> Result<String, String> {
+    std::fs::read_to_string(&path).map_err(|e| format!("读取文件失败: {e}"))
+}
+
 /// 批量查询：支持每行一个域名，也兼容逗号/分号/空格分隔；
 /// 自动去重（保持输入顺序）。
 fn parse_domains(domains: Vec<String>) -> Vec<String> {
@@ -224,7 +235,14 @@ async fn query_one(domain: &str, use_dns_discovery: bool) -> BatchItem {
 
 pub fn run() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![lookup, lookup_batch, cancel_lookup])
+        .plugin(tauri_plugin_dialog::init())
+        .invoke_handler(tauri::generate_handler![
+            lookup,
+            lookup_batch,
+            cancel_lookup,
+            write_dict_file,
+            read_dict_file
+        ])
         .run(tauri::generate_context!())
         .expect("运行 HapWHOIS 失败");
 }

@@ -3,6 +3,5 @@
   "identifier": "default",
   "description": "HapWHOIS 默认能力",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": ["core:default", "dialog:default"]
 }
-
