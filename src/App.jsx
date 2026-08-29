@@ -331,12 +331,12 @@ export default function App() {
   const [manualText, setManualText] = useState("");
   const [keywords, setKeywords] = useState(DEFAULT_KEYWORDS);
   const [affixes, setAffixes] = useState(DEFAULT_AFFIXES);
-  const [wordModes, setWordModes] = useState(["alone", "kw+af", "af+kw"]);
+  const [wordModes, setWordModes] = useState([]);
   const [suffixes, setSuffixes] = useState(DEFAULT_SUFFIXES);
   const [appendSuffix, setAppendSuffix] = useState(true);
   const [minLen, setMinLen] = useState(1);
   const [maxLen, setMaxLen] = useState(3);
-  const [letterTypes, setLetterTypes] = useState(["a", "0", "aa", "0a", "a0", "00"]);
+  const [letterTypes, setLetterTypes] = useState([]);
   const [cap, setCap] = useState(500);
   const [dictMsg, setDictMsg] = useState("");
 
@@ -785,7 +785,7 @@ export default function App() {
                   checked={appendSuffix}
                   onChange={(e) => setAppendSuffix(e.target.checked)}
                 />
-                生成时自动追加后缀（如 cloud.com）
+                生成时自动追加后缀（如 800705.xyz）
               </label>
             </div>
             <input
