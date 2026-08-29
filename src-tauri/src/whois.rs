@@ -4,6 +4,13 @@ use hickory_resolver::TokioResolver;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
+pub struct WhoisData {
+    pub text: String,
+    pub server: String,
+    /// 服务器返回“无匹配”，域名未注册（可能可注册）
+    pub available: bool,
+}
+
 /// 内置 TLD → WHOIS 服务器映射表（按域名后缀自动路由）
 fn whois_server(tld: &str) -> Option<&'static str> {
     Some(match tld {
@@ -114,7 +121,7 @@ async fn connect(server: &str) -> Result<TcpStream, String> {
 
 /// 查询 WHOIS，返回 (原始文本, 实际使用的服务器)。
 /// 服务器来源可能是内置表，也可能是 whois-servers.net DNS 发现。
-pub async fn lookup(domain: &str, use_dns_discovery: bool) -> Result<(String, String), String> {
+pub async fn lookup(domain: &str, use_dns_discovery: bool) -> Result<WhoisData, String> {
     let server = resolve_server(domain, use_dns_discovery).await.ok_or_else(|| {
         let tld = domain.rsplit('.').next().unwrap_or_default();
         format!(".{tld} 无内置路由且 whois-servers.net 未收录")
@@ -139,14 +146,15 @@ pub async fn lookup(domain: &str, use_dns_discovery: bool) -> Result<(String, St
 
     let text = String::from_utf8_lossy(&bytes).to_string();
     let lower = text.to_lowercase();
-    if text.trim().is_empty()
+    let available = text.trim().is_empty()
         || lower.contains("no match for")
         || lower.contains("not found:")
-        || lower.contains("no entries found")
-    {
-        return Err(format!("WHOIS 查询无结果（域名可能未注册）：{server}"));
-    }
-    Ok((text, server))
+        || lower.contains("no entries found");
+    Ok(WhoisData {
+        text,
+        server,
+        available,
+    })
 }
 
 #[cfg(test)]
@@ -178,11 +186,21 @@ mod tests {
 
     #[tokio::test]
     async fn whois_example_com() {
-        let (text, server) = lookup("example.com", false)
+        let data = lookup("example.com", false)
             .await
             .expect("WHOIS 查询失败");
-        assert_eq!(server, "whois.verisign-grs.com");
-        assert!(text.len() > 50);
+        assert_eq!(data.server, "whois.verisign-grs.com");
+        assert!(!data.available);
+        assert!(data.text.len() > 50);
+    }
+
+    #[tokio::test]
+    async fn whois_unregistered_detected() {
+        let data = lookup("zzq9x-nope-8842-this-domain-wont-exist.com", false)
+            .await
+            .expect("WHOIS 查询失败");
+        assert!(data.available, "未注册域名应标记为 available");
+        assert!(!data.text.is_empty());
     }
 
     #[tokio::test]
@@ -190,14 +208,11 @@ mod tests {
         // 端到端：.top 走 DNS 发现后能连上服务器并拿到响应
         // example.top 可能未注册（返回“无结果”），这也证明连通成功
         match lookup("example.top", true).await {
-            Ok((text, server)) => {
-                assert_eq!(server, "top.whois-servers.net");
-                assert!(text.len() > 50);
+            Ok(data) => {
+                assert_eq!(data.server, "top.whois-servers.net");
+                assert!(!data.text.is_empty());
             }
-            Err(e) => assert!(
-                e.contains("无结果") || e.contains("超时"),
-                "意外的错误: {e}"
-            ),
+            Err(e) => assert!(e.contains("超时") || e.contains("连接"), "意外的错误: {e}"),
         }
     }
 }

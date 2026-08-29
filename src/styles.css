@@ -621,6 +621,38 @@ textarea.mini:focus {
   color: var(--muted);
 }
 
+.summary-avail {
+  border: none;
+  background: none;
+  padding: 0;
+  color: #047857;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.summary-avail:hover {
+  text-decoration: underline;
+}
+
+.summary-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.btn-active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.btn-active:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
 .progress-bar-wrap {
   margin-top: 16px;
   height: 6px;
@@ -711,6 +743,13 @@ textarea.mini:focus {
   white-space: normal;
 }
 
+.bcell-avail {
+  color: #047857;
+  grid-column: 1 / -1;
+  font-size: 12px;
+  white-space: normal;
+}
+
 .brow-detail {
   border-top: 1px dashed #eef0f2;
 }
@@ -753,6 +792,11 @@ textarea.mini:focus {
 .badge-gray {
   background: #eef0f2;
   color: #6b7280;
+}
+
+.badge-avail {
+  background: #d1fae5;
+  color: #047857;
 }
 
 @media (max-width: 720px) {

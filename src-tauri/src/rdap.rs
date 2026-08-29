@@ -1,6 +1,23 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+#[derive(Debug)]
+pub enum RdapError {
+    /// 域名未注册（RDAP 404）
+    NotFound,
+    Other(String),
+}
+
+fn check_status(status: u16) -> Result<(), RdapError> {
+    if (200..300).contains(&status) {
+        Ok(())
+    } else if status == 404 {
+        Err(RdapError::NotFound)
+    } else {
+        Err(RdapError::Other(format!("RDAP 返回 HTTP {status}")))
+    }
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct RdapInfo {
@@ -56,28 +73,26 @@ fn vcard_value(entities: Option<&Value>, kind: &str) -> Option<String> {
         .map(String::from)
 }
 
-pub async fn lookup(domain: &str) -> Result<RdapInfo, String> {
+pub async fn lookup(domain: &str) -> Result<RdapInfo, RdapError> {
     let url = format!("https://rdap.org/domain/{domain}");
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
         .user_agent("HapWHOIS/0.1 (desktop app)")
         .build()
-        .map_err(|e| format!("创建 HTTP 客户端失败: {e}"))?;
+        .map_err(|e| RdapError::Other(format!("创建 HTTP 客户端失败: {e}")))?;
 
     let resp = client
         .get(&url)
         .send()
         .await
-        .map_err(|e| format!("RDAP 请求失败: {e}"))?;
+        .map_err(|e| RdapError::Other(format!("RDAP 请求失败: {e}")))?;
 
-    if !resp.status().is_success() {
-        return Err(format!("RDAP 返回 HTTP {}", resp.status().as_u16()));
-    }
+    check_status(resp.status().as_u16())?;
 
     let raw: Value = resp
         .json()
         .await
-        .map_err(|e| format!("RDAP 响应解析失败: {e}"))?;
+        .map_err(|e| RdapError::Other(format!("RDAP 响应解析失败: {e}")))?;
 
     let entities = raw.get("entities");
     let registrar = vcard_value(entities, "fn")
@@ -120,5 +135,12 @@ mod tests {
         assert!(!info.nameservers.is_empty());
         assert!(info.creation_date.is_some());
         println!("registrar={:?} created={:?} ns={:?}", info.registrar, info.creation_date, info.nameservers);
+    }
+
+    #[test]
+    fn status_classification() {
+        assert!(check_status(200).is_ok());
+        assert!(matches!(check_status(404), Err(RdapError::NotFound)));
+        assert!(matches!(check_status(500), Err(RdapError::Other(_))));
     }
 }

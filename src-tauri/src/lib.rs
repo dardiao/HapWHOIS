@@ -14,6 +14,7 @@ pub struct LookupResult {
     rdap: Option<rdap::RdapInfo>,
     whois_raw: Option<String>,
     whois_server: Option<String>,
+    available: bool,
     error: Option<String>,
 }
 
@@ -24,6 +25,7 @@ pub struct BatchItem {
     rdap: Option<rdap::RdapInfo>,
     whois_raw: Option<String>,
     whois_server: Option<String>,
+    available: bool,
     error: Option<String>,
 }
 
@@ -71,22 +73,29 @@ fn normalize_domain(input: &str) -> Result<String, String> {
 async fn lookup(domain: String, use_dns_discovery: bool) -> Result<LookupResult, String> {
     let domain = normalize_domain(&domain)?;
 
-    let rdap = rdap::lookup(&domain).await.ok();
-    let (whois_raw, whois_server) = match whois::lookup(&domain, use_dns_discovery).await {
-        Ok((text, server)) => (Some(text), Some(server)),
-        Err(_) => (None, None),
+    let (rdap, rdap_not_found) = match rdap::lookup(&domain).await {
+        Ok(info) => (Some(info), false),
+        Err(rdap::RdapError::NotFound) => (None, true),
+        Err(_) => (None, false),
     };
-
-    if rdap.is_none() && whois_raw.is_none() {
-        return Err("查询失败：RDAP 与 WHOIS 均未返回有效结果（可能是域名不存在或网络异常）".into());
-    }
+    let (whois_raw, whois_server, whois_available) = match whois::lookup(&domain, use_dns_discovery).await {
+        Ok(data) => (Some(data.text), Some(data.server), data.available),
+        Err(_) => (None, None, false),
+    };
+    let available = rdap_not_found || whois_available;
+    let error = if !available && rdap.is_none() && whois_raw.is_none() {
+        Some("查询失败：RDAP 与 WHOIS 均未返回有效结果（可能是域名不存在或网络异常）".into())
+    } else {
+        None
+    };
 
     Ok(LookupResult {
         domain,
         rdap,
         whois_raw,
         whois_server,
-        error: None,
+        available,
+        error,
     })
 }
 
@@ -199,6 +208,7 @@ async fn query_one(domain: &str, use_dns_discovery: bool) -> BatchItem {
             rdap: None,
             whois_raw: None,
             whois_server: None,
+            available: false,
             error: Some("已停止（未执行）".into()),
         };
     }
@@ -211,15 +221,21 @@ async fn query_one(domain: &str, use_dns_discovery: bool) -> BatchItem {
             rdap: None,
             whois_raw: None,
             whois_server: None,
+            available: false,
             error: Some("已停止".into()),
         };
     }
-    let rdap = rdap.ok();
-    let (whois_raw, whois_server) = match whois {
-        Ok((text, server)) => (Some(text), Some(server)),
-        Err(_) => (None, None),
+    let (rdap, rdap_not_found) = match rdap {
+        Ok(info) => (Some(info), false),
+        Err(rdap::RdapError::NotFound) => (None, true),
+        Err(_) => (None, false),
     };
-    let error = if rdap.is_none() && whois_raw.is_none() {
+    let (whois_raw, whois_server, whois_available) = match whois {
+        Ok(data) => (Some(data.text), Some(data.server), data.available),
+        Err(_) => (None, None, false),
+    };
+    let available = rdap_not_found || whois_available;
+    let error = if !available && rdap.is_none() && whois_raw.is_none() {
         Some("RDAP 与 WHOIS 均未返回结果".into())
     } else {
         None
@@ -229,6 +245,7 @@ async fn query_one(domain: &str, use_dns_discovery: bool) -> BatchItem {
         rdap,
         whois_raw,
         whois_server,
+        available,
         error,
     }
 }

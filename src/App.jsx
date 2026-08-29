@@ -150,6 +150,7 @@ function whoisServerLabel(server) {
 }
 
 function statusOf(item) {
+  if (item.available) return { text: "可注册", cls: "badge-avail" };
   if (item.error?.includes("已停止")) return { text: "未执行", cls: "badge-gray" };
   if (item.error) return { text: "失败", cls: "badge-red" };
   return { text: "成功", cls: "badge-green" };
@@ -184,6 +185,9 @@ function ResultRow({ item }) {
           <div className="bcell bcell-error" title={item.error}>
             {item.error}
           </div>
+        )}
+        {item.available && (
+          <div className="bcell bcell-avail">该域名未注册，可能可以注册</div>
         )}
       </div>
       {(item.rdap || item.whoisRaw) && (
@@ -239,12 +243,14 @@ export default function App() {
   const [elapsed, setElapsed] = useState(0);
   const [error, setError] = useState(null);
   const [useDnsDiscovery, setUseDnsDiscovery] = useState(true);
+  const [viewFilter, setViewFilter] = useState("all"); // all | available
 
   const itemsRef = useRef([]);
   const pendingRef = useRef([]);
   const flushTimer = useRef(null);
   const elapsedTimer = useRef(null);
   const unlistenRef = useRef([]);
+  const resultsRef = useRef(null);
 
   // ---- 字典生成 ----
   const [dict, setDict] = useState([]);
@@ -302,6 +308,7 @@ export default function App() {
     setError(null);
     setElapsed(0);
     setProgress({ done: 0, total: domains.length });
+    setViewFilter("all");
     setPhase("loading");
 
     flushTimer.current = setInterval(flush, 200);
@@ -471,7 +478,23 @@ export default function App() {
     );
   };
 
-  const successCount = items.filter((i) => !i.error).length;
+  const clearResults = () => {
+    setItems([]);
+    setProgress({ done: 0, total: 0 });
+    setElapsed(0);
+    setError(null);
+    setViewFilter("all");
+    setPhase("idle");
+  };
+
+  const showAvailableOnly = () => {
+    setViewFilter("available");
+    resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
+  const shownItems = viewFilter === "available" ? items.filter((i) => i.available) : items;
+  const availableCount = items.filter((i) => i.available).length;
+  const successCount = items.filter((i) => !i.error && !i.available).length;
   const failedCount = items.filter((i) => i.error && !i.error.includes("已停止")).length;
   const stoppedCount = items.filter((i) => i.error?.includes("已停止")).length;
 
@@ -562,14 +585,38 @@ export default function App() {
           {phase === "error" && <div className="error-box">{error}</div>}
 
           {items.length > 0 && (
-            <div className="result-stack">
+            <div className="result-stack" ref={resultsRef}>
               <div className="summary">
                 共 {items.length} 个：
                 <span className="summary-ok">{successCount} 成功</span>
                 {failedCount > 0 && <span className="summary-fail">{failedCount} 失败</span>}
                 {stoppedCount > 0 && <span className="summary-stop">{stoppedCount} 未执行</span>}
+                {availableCount > 0 && (
+                  <button className="summary-avail" onClick={showAvailableOnly}>
+                    {availableCount} 个可注册 →
+                  </button>
+                )}
                 {phase === "done" && !stoppedCount && "（完成）"}
                 {phase === "done" && stoppedCount > 0 && "（已停止）"}
+                <span className="summary-actions">
+                  <button
+                    className={`btn-small ${viewFilter === "all" ? "btn-active" : ""}`}
+                    onClick={() => setViewFilter("all")}
+                  >
+                    全部（{items.length}）
+                  </button>
+                  {availableCount > 0 && (
+                    <button
+                      className={`btn-small ${viewFilter === "available" ? "btn-active" : ""}`}
+                      onClick={() => setViewFilter("available")}
+                    >
+                      可注册（{availableCount}）
+                    </button>
+                  )}
+                  <button className="btn-small" onClick={clearResults}>
+                    清除结果
+                  </button>
+                </span>
               </div>
               <div className="batch-table">
                 <div className="brow brow-head brow-main">
@@ -579,7 +626,7 @@ export default function App() {
                   <div className="bcell">到期时间</div>
                   <div className="bcell">WHOIS 服务器</div>
                 </div>
-                {items.map((item) => (
+                {shownItems.map((item) => (
                   <ResultRow key={item.domain} item={item} />
                 ))}
               </div>
