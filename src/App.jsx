@@ -266,7 +266,7 @@ function ResultRow({ item }) {
           </div>
         )}
         {item.available && (
-          <div className="bcell bcell-avail">该域名未注册，可能可以注册</div>
+          <div className="bcell bcell-avail">公网查询显示可注册，结果以注册商为准</div>
         )}
       </div>
       {(item.rdap || item.whoisRaw) && (

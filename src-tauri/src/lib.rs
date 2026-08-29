@@ -86,7 +86,11 @@ async fn lookup(domain: String, use_dns_discovery: bool) -> Result<LookupResult,
         Ok(data) => (Some(data.text), Some(data.server), data.available),
         Err(_) => (None, None, false),
     };
-    let available = rdap_not_found || whois_available;
+    // 可注册判定保持保守：
+    // - WHOIS 明确返回 free / no match → 可注册
+    // - 注册局 RDAP 明确 404 且 WHOIS 无任何数据 → 可注册
+    // - WHOIS 返回了注册数据（即使 RDAP 404，如 .de 无 RDAP）→ 按已注册处理
+    let available = whois_available || (rdap_not_found && whois_raw.is_none());
     let error = if !available && rdap.is_none() && whois_raw.is_none() {
         Some("查询失败：RDAP 与 WHOIS 均未返回有效结果（可能是域名不存在或网络异常）".into())
     } else {
@@ -241,7 +245,7 @@ async fn query_one(domain: &str, use_dns_discovery: bool) -> BatchItem {
         Ok(data) => (Some(data.text), Some(data.server), data.available),
         Err(_) => (None, None, false),
     };
-    let available = rdap_not_found || whois_available;
+    let available = whois_available || (rdap_not_found && whois_raw.is_none());
     let error = if !available && rdap.is_none() && whois_raw.is_none() {
         Some("RDAP 与 WHOIS 均未返回结果".into())
     } else {

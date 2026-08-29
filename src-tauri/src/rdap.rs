@@ -3,8 +3,10 @@ use serde_json::Value;
 
 #[derive(Debug)]
 pub enum RdapError {
-    /// 域名未注册（RDAP 404）
+    /// 域名未注册（注册局 RDAP 明确返回 404）
     NotFound,
+    /// 该 TLD 没有 RDAP 服务（rdap.org 返回 404，不代表域名未注册）
+    Unsupported,
     Other(String),
 }
 
@@ -12,16 +14,21 @@ impl std::fmt::Display for RdapError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             RdapError::NotFound => write!(f, "域名未注册（RDAP 404）"),
+            RdapError::Unsupported => write!(f, "该 TLD 无 RDAP 服务"),
             RdapError::Other(msg) => write!(f, "{msg}"),
         }
     }
 }
 
-fn check_status(status: u16) -> Result<(), RdapError> {
+fn classify_response(status: u16, final_host: &str) -> Result<(), RdapError> {
     if (200..300).contains(&status) {
         Ok(())
-    } else if status == 404 {
+    } else if status == 404 && !final_host.contains("rdap.org") {
+        // 请求已重定向到注册局 RDAP 端点后返回 404 → 域名确实未注册
         Err(RdapError::NotFound)
+    } else if status == 404 {
+        // 停留在 rdap.org（无 bootstrap 条目，如 .de）→ 该 TLD 无 RDAP 服务
+        Err(RdapError::Unsupported)
     } else {
         Err(RdapError::Other(format!("RDAP 返回 HTTP {status}")))
     }
@@ -96,7 +103,8 @@ pub async fn lookup(domain: &str) -> Result<RdapInfo, RdapError> {
         .await
         .map_err(|e| RdapError::Other(format!("RDAP 请求失败: {e}")))?;
 
-    check_status(resp.status().as_u16())?;
+    let final_host = resp.url().host_str().unwrap_or_default().to_string();
+    classify_response(resp.status().as_u16(), &final_host)?;
 
     let raw: Value = resp
         .json()
@@ -148,8 +156,20 @@ mod tests {
 
     #[test]
     fn status_classification() {
-        assert!(check_status(200).is_ok());
-        assert!(matches!(check_status(404), Err(RdapError::NotFound)));
-        assert!(matches!(check_status(500), Err(RdapError::Other(_))));
+        assert!(classify_response(200, "rdap.verisign.com").is_ok());
+        // 注册局端点 404 = 未注册
+        assert!(matches!(
+            classify_response(404, "rdap.verisign.com"),
+            Err(RdapError::NotFound)
+        ));
+        // rdap.org 本体 404（如 .de 无 RDAP）= 无服务，不算未注册
+        assert!(matches!(
+            classify_response(404, "rdap.org"),
+            Err(RdapError::Unsupported)
+        ));
+        assert!(matches!(
+            classify_response(500, "rdap.org"),
+            Err(RdapError::Other(_))
+        ));
     }
 }

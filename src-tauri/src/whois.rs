@@ -146,10 +146,24 @@ pub async fn lookup(domain: &str, use_dns_discovery: bool) -> Result<WhoisData, 
 
     let text = String::from_utf8_lossy(&bytes).to_string();
     let lower = text.to_lowercase();
+
+    // 注册局限流/风控提示：当作查询失败，保留服务器原文。
+    if lower.contains("too many requests") || lower.contains("slow down") {
+        let msg = text
+            .lines()
+            .map(|line| line.trim())
+            .filter(|line| !line.starts_with('%'))
+            .next()
+            .unwrap_or("too many requests");
+        return Err(msg.to_string());
+    }
+
     let available = text.trim().is_empty()
         || lower.contains("no match for")
         || lower.contains("not found:")
-        || lower.contains("no entries found");
+        || lower.contains("no entries found")
+        || lower.contains("status: free")
+        || lower.contains("no matching objects");
     Ok(WhoisData {
         text,
         server,
