@@ -1,7 +1,5 @@
 # HapWHOIS
 
-类 whoisthisdomain 的**域名注册信息查询桌面应用**，同时支持 macOS 与 Windows。
-
 - RDAP 优先（主流 TLD 返回结构化 JSON）
 - 传统 WHOIS（TCP 43 端口）兜底，展示原始输出
 - 显示注册商、注册/到期/更新时间、域名状态、Name Server
