@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
 use tokio::sync::Semaphore;
 use tauri::Emitter;
+use tauri::menu::{AboutMetadata, Menu, PredefinedMenuItem, Submenu};
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -253,6 +254,60 @@ async fn query_one(domain: &str, use_dns_discovery: bool) -> BatchItem {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .menu(|app| {
+            let about = PredefinedMenuItem::about(
+                app,
+                Some("About HapWHOIS"),
+                Some(AboutMetadata {
+                    name: Some("HapWHOIS".into()),
+                    version: Some(env!("CARGO_PKG_VERSION").into()),
+                    copyright: Some(
+                        "© 2026 HapX™ 保留所有权利。HapX™ 是 HapX 的注册商标。".into(),
+                    ),
+                    ..Default::default()
+                }),
+            )?;
+            let app_menu = Submenu::with_items(
+                app,
+                "HapWHOIS",
+                true,
+                &[
+                    &about,
+                    &PredefinedMenuItem::separator(app)?,
+                    &PredefinedMenuItem::services(app, None)?,
+                    &PredefinedMenuItem::separator(app)?,
+                    &PredefinedMenuItem::hide(app, None)?,
+                    &PredefinedMenuItem::hide_others(app, None)?,
+                    &PredefinedMenuItem::show_all(app, None)?,
+                    &PredefinedMenuItem::separator(app)?,
+                    &PredefinedMenuItem::quit(app, None)?,
+                ],
+            )?;
+            let edit_menu = Submenu::with_items(
+                app,
+                "Edit",
+                true,
+                &[
+                    &PredefinedMenuItem::undo(app, None)?,
+                    &PredefinedMenuItem::redo(app, None)?,
+                    &PredefinedMenuItem::separator(app)?,
+                    &PredefinedMenuItem::cut(app, None)?,
+                    &PredefinedMenuItem::copy(app, None)?,
+                    &PredefinedMenuItem::paste(app, None)?,
+                    &PredefinedMenuItem::select_all(app, None)?,
+                ],
+            )?;
+            let window_menu = Submenu::with_items(
+                app,
+                "Window",
+                true,
+                &[
+                    &PredefinedMenuItem::minimize(app, None)?,
+                    &PredefinedMenuItem::fullscreen(app, None)?,
+                ],
+            )?;
+            Menu::with_items(app, &[&app_menu, &edit_menu, &window_menu])
+        })
         .invoke_handler(tauri::generate_handler![
             lookup,
             lookup_batch,
