@@ -77,7 +77,10 @@ async fn lookup(domain: String, use_dns_discovery: bool) -> Result<LookupResult,
     let (rdap, rdap_not_found) = match rdap::lookup(&domain).await {
         Ok(info) => (Some(info), false),
         Err(rdap::RdapError::NotFound) => (None, true),
-        Err(_) => (None, false),
+        Err(e) => {
+            eprintln!("RDAP 查询失败: {e}");
+            (None, false)
+        }
     };
     let (whois_raw, whois_server, whois_available) = match whois::lookup(&domain, use_dns_discovery).await {
         Ok(data) => (Some(data.text), Some(data.server), data.available),
@@ -229,7 +232,10 @@ async fn query_one(domain: &str, use_dns_discovery: bool) -> BatchItem {
     let (rdap, rdap_not_found) = match rdap {
         Ok(info) => (Some(info), false),
         Err(rdap::RdapError::NotFound) => (None, true),
-        Err(_) => (None, false),
+        Err(e) => {
+            eprintln!("RDAP 查询失败: {e}");
+            (None, false)
+        }
     };
     let (whois_raw, whois_server, whois_available) = match whois {
         Ok(data) => (Some(data.text), Some(data.server), data.available),

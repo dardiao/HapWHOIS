@@ -8,6 +8,15 @@ pub enum RdapError {
     Other(String),
 }
 
+impl std::fmt::Display for RdapError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RdapError::NotFound => write!(f, "域名未注册（RDAP 404）"),
+            RdapError::Other(msg) => write!(f, "{msg}"),
+        }
+    }
+}
+
 fn check_status(status: u16) -> Result<(), RdapError> {
     if (200..300).contains(&status) {
         Ok(())
