@@ -439,17 +439,15 @@ export default function App() {
   );
 
   const letterEstimate = useMemo(() => {
-    let total = 0;
+    let base = 0;
     for (let len = minLen; len <= maxLen; len++) {
       for (const p of PATTERNS[len]) {
-        if (letterTypes.includes(p.id)) total += p.count;
+        if (letterTypes.includes(p.id)) base += p.count;
       }
     }
-    if (appendSuffix) {
-      const sfx = suffixList(suffixes).length;
-      total *= Math.max(1, sfx);
-    }
-    return Math.min(cap, total);
+    const sfx = appendSuffix ? suffixList(suffixes).length : 0;
+    const total = sfx > 0 ? base * sfx : base;
+    return { base, sfx, total, capped: Math.min(cap, total) };
   }, [minLen, maxLen, letterTypes, cap, appendSuffix, suffixes]);
 
   const generateWord = () => {
@@ -943,8 +941,14 @@ export default function App() {
                 ),
             )}
             <p className="desc">
-              预计生成 <strong>{letterEstimate}</strong> 个，去重后新增约{" "}
-              <strong>{letterEstimate}</strong> 个
+              域名不区分大小写：字母按 26 个小写字母计算，数字按 0-9 计算。
+              <br />
+              本次可生成 <strong>{letterEstimate.capped}</strong> 个
+              {appendSuffix && letterEstimate.sfx > 0
+                ? `（${letterEstimate.base} 个基础组合 × ${letterEstimate.sfx} 个后缀）`
+                : ""}
+              {letterEstimate.total > cap && `，上限 ${cap}，超出按字典序截取`}
+              ；与字典列表重复的条目加入时自动去重
             </p>
             <div className="dict-actions">
               <button type="button" className="btn-small btn-primary" onClick={generateLetter}>
