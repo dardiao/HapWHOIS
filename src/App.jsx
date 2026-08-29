@@ -401,6 +401,8 @@ export default function App() {
       itemsRef.current = results;
       pendingRef.current = [];
       setItems(results);
+      setInput("");
+      setResultMsg(`查询完成（${results.length} 条），输入框已清空，可粘贴新列表再查`);
       setPhase("done");
     } catch (e) {
       setError(String(e));
