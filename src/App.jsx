@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open, save } from "@tauri-apps/plugin-dialog";
+import { getVersion } from "@tauri-apps/api/app";
 
 const LETTERS = "abcdefghijklmnopqrstuvwxyz";
 const DIGITS = "0123456789";
@@ -344,6 +345,14 @@ export default function App() {
   const [letterTypes, setLetterTypes] = useState([]);
   const [cap, setCap] = useState(500);
   const [dictMsg, setDictMsg] = useState("");
+  const [showAbout, setShowAbout] = useState(false);
+  const [appVersion, setAppVersion] = useState("");
+
+  useEffect(() => {
+    getVersion()
+      .then(setAppVersion)
+      .catch(() => {});
+  }, []);
 
   const domains = input
     .split(/\n/)
@@ -993,6 +1002,29 @@ export default function App() {
             </pre>
           </section>
         </main>
+      )}
+
+      <footer className="footer">
+        <span className="engraved">© 2026 HapX™ · HapWHOIS · 保留所有权利</span>
+        <button type="button" className="about-btn" onClick={() => setShowAbout(true)}>
+          关于
+        </button>
+      </footer>
+
+      {showAbout && (
+        <div className="modal-mask" onClick={() => setShowAbout(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-logo">H</div>
+            <h2>HapWHOIS</h2>
+            <p className="modal-version">v{appVersion || "0.3.0"}</p>
+            <p className="engraved modal-copyright">© 2026 HapX™ · 保留所有权利</p>
+            <p className="modal-tm">HapX™ 是 HapX 的注册商标</p>
+            <p className="modal-note">查询结果来自 RDAP / WHOIS 注册局，仅供参考。</p>
+            <button type="button" className="btn-small" onClick={() => setShowAbout(false)}>
+              关闭
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );

@@ -75,3 +75,9 @@ cargo test              # 需要联网，真实请求 RDAP / WHOIS
 
 - 传统 WHOIS 目前内置了常见 TLD（.com/.net/.org/.io 等）的服务器路由表；其余 TLD 依赖 RDAP（rdap.org 已覆盖绝大多数主流顶级域）。
 - 未做查询缓存与域名监控，可作为后续扩展。
+
+## 版权
+
+© 2026 HapX™。保留所有权利。
+
+HapX™ 是 HapX 的注册商标，HapWHOIS 为 HapX 旗下产品。未经许可，不得擅自复制、分发或修改本软件及其相关素材。
