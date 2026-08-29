@@ -165,22 +165,6 @@ input {
   background: #fdf0ef;
 }
 
-.link-btn {
-  margin-left: 8px;
-  border: none;
-  background: none;
-  padding: 3px 8px;
-  color: var(--muted);
-  font-size: 12px;
-  cursor: default;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-}
-
-.link-btn:hover {
-  background: #f4f5f7;
-}
-
 .tabs {
   display: flex;
   gap: 4px;
@@ -376,6 +360,17 @@ textarea.mini:focus {
 
 .btn-danger:hover {
   background: #fdf0ef;
+}
+
+.btn-export-query {
+  background: #e5f6ec;
+  border-color: #b7e3c8;
+  color: #087443;
+}
+
+.btn-export-query:hover {
+  background: #d1f1de;
+  border-color: #92d3aa;
 }
 
 .num-row {

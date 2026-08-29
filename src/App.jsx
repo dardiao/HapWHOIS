@@ -111,6 +111,11 @@ function applySuffixes(items, suffixes, enabled) {
   if (!enabled || !suffixes.length) return items;
   const out = new Set();
   for (const base of items) {
+    // 已带后缀/完整域名的按原样保留，避免 example.com.com
+    if (base.includes(".")) {
+      out.add(base);
+      continue;
+    }
     for (const sfx of suffixes) out.add(`${base}.${sfx}`);
   }
   return [...out];
@@ -486,8 +491,13 @@ export default function App() {
       setDictMsg("手动输入为空");
       return;
     }
-    const added = appendEntries(items);
-    setDictMsg(`手动输入新增 ${added} 个`);
+    const suffixed = applySuffixes(items, suffixList(suffixes), appendSuffix);
+    const added = appendEntries(suffixed);
+    setDictMsg(
+      appendSuffix && suffixList(suffixes).length
+        ? `手动输入新增 ${added} 个（含后缀）`
+        : `手动输入新增 ${added} 个`,
+    );
   };
 
   const importFile = async () => {
@@ -498,8 +508,13 @@ export default function App() {
     if (!path) return;
     const content = await invoke("read_dict_file", { path });
     setManualText(content);
-    const added = appendEntries(parseList(content));
-    setDictMsg(`已导入 ${path}，新增 ${added} 个`);
+    const suffixed = applySuffixes(parseList(content), suffixList(suffixes), appendSuffix);
+    const added = appendEntries(suffixed);
+    setDictMsg(
+      `已导入 ${path}，新增 ${added} 个${
+        appendSuffix && suffixList(suffixes).length ? "（含后缀）" : ""
+      }`,
+    );
   };
 
   const exportDict = async () => {
@@ -669,11 +684,6 @@ export default function App() {
             <div className="search-row">
               <p className="hint-left">
                 已识别 <strong>{domains.length}</strong> 个域名 · 并发 6 · 单域名超时 10s
-                {dict.length > 0 && (
-                  <button type="button" className="link-btn" onClick={importDictToQuery}>
-                    从字典导入（{dict.length}）
-                  </button>
-                )}
               </p>
               {phase === "loading" ? (
                 <button type="button" className="btn-stop" onClick={doStop}>
@@ -948,8 +958,8 @@ export default function App() {
                 共 <strong>{dict.length}</strong> 条
               </span>
               <div className="dict-actions">
-                <button type="button" className="btn-small" onClick={importDictToQuery}>
-                  加入查询列表
+                <button type="button" className="btn-small btn-export-query" onClick={importDictToQuery}>
+                  导出到批量查询
                 </button>
                 <button type="button" className="btn-small" onClick={exportDict}>
                   导出 .txt…
