@@ -804,7 +804,7 @@ export default function App() {
                   checked={appendSuffix}
                   onChange={(e) => setAppendSuffix(e.target.checked)}
                 />
-                生成时自动追加后缀（如 800705.xyz）
+                生成时自动追加后缀
               </label>
             </div>
             <input
