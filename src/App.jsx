@@ -153,7 +153,80 @@ function statusOf(item) {
   if (item.available) return { text: "可注册", cls: "badge-avail" };
   if (item.error?.includes("已停止")) return { text: "未执行", cls: "badge-gray" };
   if (item.error) return { text: "失败", cls: "badge-red" };
-  return { text: "成功", cls: "badge-green" };
+  return { text: "被注册", cls: "badge-registered" };
+}
+
+const csvEscape = (v) => {
+  const s = String(v ?? "");
+  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+};
+
+const htmlEscape = (s) =>
+  String(s ?? "").replace(
+    /[&<>"']/g,
+    (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]),
+  );
+
+function statusText(item) {
+  if (item.available) return "可注册";
+  if (item.error?.includes("已停止")) return "未执行";
+  if (item.error) return "失败";
+  return "被注册";
+}
+
+function buildHtmlReport(rows, counts) {
+  const cls = (s) =>
+    s === "可注册" ? "avail" : s === "被注册" ? "reg" : s === "失败" ? "fail" : "stop";
+  const trs = rows
+    .map(
+      (r) => `<tr class="${cls(r.status)}">
+        <td>${htmlEscape(r.domain)}</td>
+        <td>${htmlEscape(r.status)}</td>
+        <td>${htmlEscape(r.source)}</td>
+        <td>${htmlEscape(r.registrar)}</td>
+        <td>${htmlEscape(r.expiry)}</td>
+        <td>${htmlEscape(r.whoisServer)}</td>
+        <td>${htmlEscape(r.error)}</td>
+      </tr>`,
+    )
+    .join("\n");
+  return `<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>HapWHOIS 查询结果</title>
+  <style>
+    body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; margin: 24px; color: #1c1e21; }
+    h1 { font-size: 18px; }
+    .summary { color: #555; font-size: 13px; margin: 12px 0; }
+    .reg { color: #1a56db; }
+    .avail { color: #047857; }
+    .fail { color: #b42318; }
+    .stop { color: #6b7280; }
+    table { border-collapse: collapse; width: 100%; font-size: 13px; }
+    th, td { border: 1px solid #e3e5e8; padding: 6px 10px; text-align: left; }
+    th { background: #f7f8fa; }
+    td:first-child { font-family: ui-monospace, Menlo, Consolas, monospace; }
+  </style>
+</head>
+<body>
+  <h1>HapWHOIS 查询结果（共 ${counts.total} 个）</h1>
+  <p class="summary">
+    <span class="reg">${counts.registered} 被注册</span> ·
+    <span class="avail">${counts.available} 可注册</span> ·
+    <span class="fail">${counts.failed} 失败</span> ·
+    <span class="stop">${counts.stopped} 未执行</span>
+  </p>
+  <table>
+    <thead>
+      <tr><th>域名</th><th>状态</th><th>数据源</th><th>注册商</th><th>到期时间</th><th>WHOIS 服务器</th><th>备注</th></tr>
+    </thead>
+    <tbody>
+${trs}
+    </tbody>
+  </table>
+</body>
+</html>`;
 }
 
 function ResultRow({ item }) {
@@ -242,6 +315,7 @@ export default function App() {
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [elapsed, setElapsed] = useState(0);
   const [error, setError] = useState(null);
+  const [resultMsg, setResultMsg] = useState("");
   const [useDnsDiscovery, setUseDnsDiscovery] = useState(true);
   const [viewFilter, setViewFilter] = useState("all"); // all | available
 
@@ -306,6 +380,7 @@ export default function App() {
     pendingRef.current = [];
     setItems([]);
     setError(null);
+    setResultMsg("");
     setElapsed(0);
     setProgress({ done: 0, total: domains.length });
     setViewFilter("all");
@@ -492,6 +567,54 @@ export default function App() {
     resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
+  const exportResults = async (format) => {
+    if (!items.length) return;
+    const rows = items.map((it) => ({
+      domain: it.domain,
+      status: statusText(it),
+      source: sourceLabel(it),
+      registrar: it.rdap?.registrar ?? "",
+      expiry: it.rdap?.expirationDate ?? "",
+      whoisServer: it.whoisServer ?? "",
+      error: it.error ?? "",
+    }));
+    const counts = {
+      total: items.length,
+      registered: successCount,
+      available: availableCount,
+      failed: failedCount,
+      stopped: stoppedCount,
+    };
+
+    let content = "";
+    let ext = "";
+    if (format === "csv") {
+      ext = "csv";
+      const head = ["域名", "状态", "数据源", "注册商", "到期时间", "WHOIS 服务器", "备注"];
+      content =
+        "\uFEFF" +
+        [
+          head,
+          ...rows.map((r) =>
+            [r.domain, r.status, r.source, r.registrar, r.expiry, r.whoisServer, r.error]
+              .map(csvEscape)
+              .join(","),
+          ),
+        ].join("\r\n");
+    } else {
+      ext = "html";
+      content = buildHtmlReport(rows, counts);
+    }
+
+    const path = await save({
+      defaultPath: `hapwhois-results.${ext}`,
+      filters: [{ name: ext.toUpperCase(), extensions: [ext] }],
+    });
+    if (!path) return;
+    await invoke("write_dict_file", { path, content });
+    setResultMsg(`已导出 ${items.length} 条 → ${path}`);
+  };
+
   const shownItems = viewFilter === "available" ? items.filter((i) => i.available) : items;
   const availableCount = items.filter((i) => i.available).length;
   const successCount = items.filter((i) => !i.error && !i.available).length;
@@ -588,7 +711,7 @@ export default function App() {
             <div className="result-stack" ref={resultsRef}>
               <div className="summary">
                 共 {items.length} 个：
-                <span className="summary-ok">{successCount} 成功</span>
+                <span className="summary-registered">{successCount} 被注册</span>
                 {failedCount > 0 && <span className="summary-fail">{failedCount} 失败</span>}
                 {stoppedCount > 0 && <span className="summary-stop">{stoppedCount} 未执行</span>}
                 {availableCount > 0 && (
@@ -596,8 +719,11 @@ export default function App() {
                     {availableCount} 个可注册 →
                   </button>
                 )}
-                {phase === "done" && !stoppedCount && "（完成）"}
-                {phase === "done" && stoppedCount > 0 && "（已停止）"}
+                {phase === "done" && !stoppedCount && (
+                  <span className="summary-done">（完成）</span>
+                )}
+                {phase === "done" && stoppedCount > 0 && <span className="summary-stop">（已停止）</span>}
+                {resultMsg && <span className="export-msg" title={resultMsg}>{resultMsg}</span>}
                 <span className="summary-actions">
                   <button
                     className={`btn-small ${viewFilter === "all" ? "btn-active" : ""}`}
@@ -613,6 +739,12 @@ export default function App() {
                       可注册（{availableCount}）
                     </button>
                   )}
+                  <button type="button" className="btn-small" onClick={() => exportResults("csv")}>
+                    导出 CSV
+                  </button>
+                  <button type="button" className="btn-small" onClick={() => exportResults("html")}>
+                    导出 HTML
+                  </button>
                   <button className="btn-small" onClick={clearResults}>
                     清除结果
                   </button>
@@ -670,7 +802,9 @@ export default function App() {
 
           <div className="dict-grid">
             <section className="dict-section">
-              <h3>手动输入 / 导入</h3>
+              <h3>
+                <span className="plan-badge">方案 1</span>手动输入 / 导入
+              </h3>
               <p className="desc">粘贴或导入已有的域名/字典，逐行或逗号分隔</p>
               <textarea
                 className="mini"
@@ -681,7 +815,7 @@ export default function App() {
                 spellCheck={false}
               />
               <div className="dict-actions">
-                <button type="button" className="btn-small" onClick={addManual}>
+                <button type="button" className="btn-small btn-primary" onClick={addManual}>
                   加入列表
                 </button>
                 <button type="button" className="btn-small" onClick={importFile}>
@@ -691,7 +825,9 @@ export default function App() {
             </section>
 
             <section className="dict-section">
-              <h3>词根组合（起名助手）</h3>
+              <h3>
+                <span className="plan-badge">方案 2</span>词根组合（起名助手）
+              </h3>
               <p className="desc">围绕你喜欢的词，自动拼出各种组合</p>
               <label className="mini-label">关键词（想围绕什么词起名）</label>
               <textarea
@@ -732,7 +868,9 @@ export default function App() {
           </div>
 
           <section className="dict-section letter-section">
-            <h3>高级选项（字母组合 / 批量字典）</h3>
+            <h3>
+              <span className="plan-badge">方案 3</span>高级选项（字母组合 / 批量字典）
+            </h3>
             <p className="desc">
               勾选需要的组合类型，数字/字母可在任意位置；最长只能 3 位。字母组合 1-3 位：理论{" "}
               <strong>18,278</strong> 个（纯字母），超过上限按字典序截取
