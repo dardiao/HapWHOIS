@@ -65,7 +65,7 @@ function cartesian(pattern) {
   return result;
 }
 
-function generateLetters(minLen, maxLen, checked, cap) {
+function generateLetters(minLen, maxLen, checked) {
   const all = [];
   for (let len = minLen; len <= maxLen; len++) {
     for (const p of PATTERNS[len]) {
@@ -81,7 +81,16 @@ function generateLetters(minLen, maxLen, checked, cap) {
     }
   }
   res.sort();
-  return res.slice(0, cap);
+  return res;
+}
+
+/// 按“起始序号 + 上限”截取一段：先展开全部基础组合（字典序），
+/// 应用后缀后再排序，最后按位置切片。
+function generateLetterBatch(minLen, maxLen, checked, suffixes, appendSuffix, offset, cap) {
+  const base = generateLetters(minLen, maxLen, checked);
+  const items = applySuffixes(base, suffixes, appendSuffix).sort();
+  const start = Math.max(0, offset - 1);
+  return items.slice(start, start + cap);
 }
 
 function generateWords(keywords, affixes, modes) {
@@ -344,6 +353,7 @@ export default function App() {
   const [maxLen, setMaxLen] = useState(3);
   const [letterTypes, setLetterTypes] = useState([]);
   const [cap, setCap] = useState(500);
+  const [startOffset, setStartOffset] = useState(1);
   const [dictMsg, setDictMsg] = useState("");
   const [showAbout, setShowAbout] = useState(false);
   const [appVersion, setAppVersion] = useState("");
@@ -455,9 +465,12 @@ export default function App() {
       }
     }
     const sfx = appendSuffix ? suffixList(suffixes).length : 0;
-    const total = sfx > 0 ? base * sfx : base;
-    return { base, sfx, total, capped: Math.min(cap, total) };
-  }, [minLen, maxLen, letterTypes, cap, appendSuffix, suffixes]);
+    const universe = sfx > 0 ? base * sfx : base;
+    const start = Math.max(1, startOffset);
+    const remaining = Math.max(0, universe - (start - 1));
+    const count = Math.min(cap, remaining);
+    return { base, sfx, universe, start, end: start + count - 1, count };
+  }, [minLen, maxLen, letterTypes, cap, appendSuffix, suffixes, startOffset]);
 
   const generateWord = () => {
     const modes = new Set(wordModes);
@@ -483,14 +496,21 @@ export default function App() {
       setDictMsg("最短长度不能大于最长长度");
       return;
     }
-    // 追加后缀时先生成全部基础名，再乘后缀后按字典序截取到上限
-    const base = generateLetters(minLen, maxLen, checked, appendSuffix ? 100000 : cap);
-    const items = applySuffixes(base, suffixList(suffixes), appendSuffix)
-      .sort()
-      .slice(0, cap);
+    const items = generateLetterBatch(
+      minLen,
+      maxLen,
+      checked,
+      suffixList(suffixes),
+      appendSuffix,
+      startOffset,
+      cap,
+    );
     const added = appendEntries(items);
+    if (items.length) {
+      setStartOffset(startOffset + items.length);
+    }
     setDictMsg(
-      `字母组合生成 ${items.length} 个${appendSuffix ? "（含后缀）" : ""}，新增 ${added} 个`,
+      `字母组合生成第 ${letterEstimate.start}–${letterEstimate.end} 个（共 ${letterEstimate.universe} 个，字典序），新增 ${added} 个`,
     );
   };
 
@@ -927,6 +947,17 @@ export default function App() {
                   }
                 />
               </label>
+              <label>
+                起始序号
+                <input
+                  type="number"
+                  min={1}
+                  value={startOffset}
+                  onChange={(e) =>
+                    setStartOffset(Math.max(1, Number(e.target.value) || 1))
+                  }
+                />
+              </label>
             </div>
             {[1, 2, 3].map(
               (len) =>
@@ -952,12 +983,13 @@ export default function App() {
             <p className="desc">
               域名不区分大小写：字母按 26 个小写字母计算，数字按 0-9 计算。
               <br />
-              本次可生成 <strong>{letterEstimate.capped}</strong> 个
-              {appendSuffix && letterEstimate.sfx > 0
-                ? `（${letterEstimate.base} 个基础组合 × ${letterEstimate.sfx} 个后缀）`
+              本次可生成 <strong>{letterEstimate.count}</strong> 个（第{" "}
+              {letterEstimate.count > 0 ? `${letterEstimate.start}–${letterEstimate.end}` : "—"} 个，共{" "}
+              {letterEstimate.universe} 个，按字典序）
+              {letterEstimate.sfx > 0
+                ? `（${letterEstimate.base} 基础 × ${letterEstimate.sfx} 后缀）`
                 : ""}
-              {letterEstimate.total > cap && `，上限 ${cap}，超出按字典序截取`}
-              ；与字典列表重复的条目加入时自动去重
+              ；生成后起始序号自动前进，方便分批续取；与字典重复的条目自动去重
             </p>
             <div className="dict-actions">
               <button type="button" className="btn-small btn-primary" onClick={generateLetter}>
