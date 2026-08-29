@@ -65,9 +65,9 @@ function cartesian(pattern) {
   return result;
 }
 
-function generateLetters(minLen, maxLen, checked) {
+function generateLetters(checked) {
   const all = [];
-  for (let len = minLen; len <= maxLen; len++) {
+  for (let len = 1; len <= 3; len++) {
     for (const p of PATTERNS[len]) {
       if (checked.has(p.id)) all.push(...cartesian(p.id));
     }
@@ -86,8 +86,8 @@ function generateLetters(minLen, maxLen, checked) {
 
 /// 按“起始序号 + 上限”截取一段：先展开全部基础组合（字典序），
 /// 应用后缀后再排序，最后按位置切片。
-function generateLetterBatch(minLen, maxLen, checked, suffixes, appendSuffix, offset, cap) {
-  const base = generateLetters(minLen, maxLen, checked);
+function generateLetterBatch(checked, suffixes, appendSuffix, offset, cap) {
+  const base = generateLetters(checked);
   const items = applySuffixes(base, suffixes, appendSuffix).sort();
   const start = Math.max(0, offset - 1);
   return items.slice(start, start + cap);
@@ -349,8 +349,6 @@ export default function App() {
   const [wordModes, setWordModes] = useState([]);
   const [suffixes, setSuffixes] = useState(DEFAULT_SUFFIXES);
   const [appendSuffix, setAppendSuffix] = useState(true);
-  const [minLen, setMinLen] = useState(1);
-  const [maxLen, setMaxLen] = useState(3);
   const [letterTypes, setLetterTypes] = useState([]);
   const [cap, setCap] = useState(500);
   const [startOffset, setStartOffset] = useState(1);
@@ -459,7 +457,7 @@ export default function App() {
 
   const letterEstimate = useMemo(() => {
     let base = 0;
-    for (let len = minLen; len <= maxLen; len++) {
+    for (let len = 1; len <= 3; len++) {
       for (const p of PATTERNS[len]) {
         if (letterTypes.includes(p.id)) base += p.count;
       }
@@ -470,7 +468,7 @@ export default function App() {
     const remaining = Math.max(0, universe - (start - 1));
     const count = Math.min(cap, remaining);
     return { base, sfx, universe, start, end: start + count - 1, count };
-  }, [minLen, maxLen, letterTypes, cap, appendSuffix, suffixes, startOffset]);
+  }, [letterTypes, cap, appendSuffix, suffixes, startOffset]);
 
   const generateWord = () => {
     const modes = new Set(wordModes);
@@ -492,13 +490,7 @@ export default function App() {
       setDictMsg("请至少勾选一种组合类型");
       return;
     }
-    if (minLen > maxLen) {
-      setDictMsg("最短长度不能大于最长长度");
-      return;
-    }
     const items = generateLetterBatch(
-      minLen,
-      maxLen,
       checked,
       suffixList(suffixes),
       appendSuffix,
@@ -911,30 +903,9 @@ export default function App() {
               <span className="plan-badge">方案 3</span>高级选项（字母组合 / 批量字典）
             </h3>
             <p className="desc">
-              勾选需要的组合类型，数字/字母可在任意位置；最长只能 3 位。字母组合 1-3 位：理论{" "}
-              <strong>18,278</strong> 个（纯字母），超过上限按字典序截取
+              勾选需要生成的组合类型（字母不分大小写、数字 0-9），生成结果按字典序排列
             </p>
             <div className="num-row">
-              <label>
-                最短长度
-                <input
-                  type="number"
-                  min={1}
-                  max={3}
-                  value={minLen}
-                  onChange={(e) => setMinLen(Math.max(1, Math.min(3, Number(e.target.value) || 1)))}
-                />
-              </label>
-              <label>
-                最长长度
-                <input
-                  type="number"
-                  min={1}
-                  max={3}
-                  value={maxLen}
-                  onChange={(e) => setMaxLen(Math.max(1, Math.min(3, Number(e.target.value) || 1)))}
-                />
-              </label>
               <label>
                 生成数量上限
                 <input
@@ -959,27 +930,23 @@ export default function App() {
                 />
               </label>
             </div>
-            {[1, 2, 3].map(
-              (len) =>
-                len >= minLen &&
-                len <= maxLen && (
-                  <div key={len} className="pattern-group">
-                    <span className="pattern-title">{len} 位</span>
-                    <div className="checkbox-grid">
-                      {PATTERNS[len].map((p) => (
-                        <label key={p.id}>
-                          <input
-                            type="checkbox"
-                            checked={letterTypes.includes(p.id)}
-                            onChange={() => toggleLetterType(p.id)}
-                          />
-                          {p.label}
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-                ),
-            )}
+            {[1, 2, 3].map((len) => (
+              <div key={len} className="pattern-group">
+                <span className="pattern-title">{len} 位</span>
+                <div className="checkbox-grid">
+                  {PATTERNS[len].map((p) => (
+                    <label key={p.id}>
+                      <input
+                        type="checkbox"
+                        checked={letterTypes.includes(p.id)}
+                        onChange={() => toggleLetterType(p.id)}
+                      />
+                      {p.label}
+                    </label>
+                  ))}
+                </div>
+              </div>
+            ))}
             <p className="desc">
               域名不区分大小写：字母按 26 个小写字母计算，数字按 0-9 计算。
               <br />
