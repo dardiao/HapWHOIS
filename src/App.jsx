@@ -1003,13 +1003,6 @@ export default function App() {
         </main>
       )}
 
-      <footer className="footer">
-        <span className="engraved">© 2026 HapX™ · HapWHOIS · 保留所有权利</span>
-        <button type="button" className="about-btn" onClick={() => setShowAbout(true)}>
-          关于
-        </button>
-      </footer>
-
       {showAbout && (
         <div className="modal-mask" onClick={() => setShowAbout(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>

@@ -831,16 +831,6 @@ textarea.mini:focus {
   color: #1a56db;
 }
 
-.footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 24px;
-  border-top: 1px solid var(--border);
-  background: var(--card);
-  font-size: 11px;
-}
-
 /* 阴刻（intaglio）文字效果：文字像刻进浅色表面 */
 .engraved {
   color: #9aa0a6;
@@ -848,20 +838,6 @@ textarea.mini:focus {
     0 -1px 0 rgba(0, 0, 0, 0.10),
     0 1px 0 rgba(255, 255, 255, 0.85);
   letter-spacing: 0.02em;
-}
-
-.about-btn {
-  border: none;
-  background: none;
-  padding: 3px 8px;
-  color: var(--muted);
-  font-size: 11px;
-  cursor: pointer;
-  border-radius: 5px;
-}
-
-.about-btn:hover {
-  background: #f4f5f7;
 }
 
 .modal-mask {
