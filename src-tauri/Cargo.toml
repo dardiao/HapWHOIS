@@ -1,6 +1,6 @@
 [package]
 name = "hapwhois"
-version = "0.3.4"
+version = "0.3.5"
 description = "WHOIS / RDAP 域名注册信息查询桌面应用"
 authors = ["HapWHOIS"]
 edition = "2021"
