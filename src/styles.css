@@ -141,6 +141,22 @@ input {
   text-decoration: underline;
 }
 
+.search-row button.link-inline {
+  height: auto;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: none;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.search-row button.link-inline:hover {
+  background: none;
+  text-decoration: underline;
+}
+
 .search-row button {
   height: 40px;
   padding: 0 22px;
