@@ -76,9 +76,15 @@ cargo test              # 需要联网，真实请求 RDAP / WHOIS
 
 ## 阿里云核验（可选，推荐开启）
 
-App 内「设置」页配置一次即可，无需单独开通 RAM 产品，普通阿里云账号也能用：
+App 内「设置」页配置一次即可。先选站点：**中国站**（aliyun.com，端点
+`domain.aliyuncs.com`）或**国际站**（alibabacloud.com，端点
+`domain-intl.aliyuncs.com`）。两站账号体系完全独立、可查后缀范围不同：
+国际站能查 .us / .de / .co.uk 等更多国家/地区域名；选哪个站点，就要配哪个站点
+RAM 账号里创建的 AccessKey。无需单独开通 RAM 产品，普通账号即可用：
 
-1. 登录 <https://ram.console.aliyun.com/users>（RAM 控制台，账号登录即可）；
+1. 中国站账号登录 <https://ram.console.aliyun.com/users>；国际站账号登录
+   <https://ram.console.alibabacloud.com/users>（国际站需先在
+   account.alibabacloud.com 用邮箱注册，账号与中国站互不相通）；
 2. 「创建用户」→ 勾选 **OpenAPI 调用访问**，保存弹出的 AccessKey ID / Secret；
 3. 给该用户授权 **AliyunDomainFullAccess**；
 4. 回到 App「设置」填入并保存。CheckDomain 免费，无额外费用。
@@ -86,6 +92,7 @@ App 内「设置」页配置一次即可，无需单独开通 RAM 产品，普�
 设置只写本机 `~/.hapwhois/settings.json`（Windows 为
 `%USERPROFILE%\.hapwhois\settings.json`，Unix 权限 600）。
 
+> aliyun.com 与 alibabacloud.com 虽界面相似，但属于两个独立平台；
 > GoDaddy / Namecheap / OVHcloud 等注册商搜索框查的也是注册局数据
 > （RDAP/WHOIS），并不存在更权威的独立公开接口；阿里云 CheckDomain
 > 与它们基于同一份事实，且官方渠道不受 .de 等注册局限流影响。

@@ -11,7 +11,10 @@ use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
 use sha1::Sha1;
 
-const ENDPOINT: &str = "https://domain.aliyuncs.com/";
+/// 中国站（aliyun.com）域名服务 API 端点
+const ENDPOINT_CN: &str = "https://domain.aliyuncs.com/";
+/// 国际站（alibabacloud.com）域名服务 API 端点：可查的后缀范围更广
+const ENDPOINT_INTL: &str = "https://domain-intl.aliyuncs.com/";
 const VERSION: &str = "2018-01-29";
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -19,6 +22,8 @@ const VERSION: &str = "2018-01-29";
 pub struct AliyunConfig {
     pub access_key: String,
     pub secret: String,
+    /// true = 国际站（alibabacloud.com）；false = 中国站（aliyun.com）
+    pub intl: bool,
 }
 
 impl AliyunConfig {
@@ -134,7 +139,8 @@ pub async fn check_domain(domain: &str, cfg: &AliyunConfig) -> Result<AliyunResu
     let signature = hmac_sha1_base64(&format!("{}&", cfg.secret), &string_to_sign);
 
     let query = format!("{canonical}&Signature={}", percent_encode(&signature));
-    let url = format!("{ENDPOINT}?{query}");
+    let endpoint = if cfg.intl { ENDPOINT_INTL } else { ENDPOINT_CN };
+    let url = format!("{endpoint}?{query}");
 
     let resp = shared_client()
         .get(&url)
@@ -162,13 +168,21 @@ pub async fn check_domain(domain: &str, cfg: &AliyunConfig) -> Result<AliyunResu
                 .unwrap_or_else(|| v.to_string())
         })
         .unwrap_or_else(|| "-1".into());
-    let premium = raw.get("Premium").and_then(|p| p.as_bool()).unwrap_or(false);
+    let premium = parse_premium(raw.get("Premium"));
     let price = raw.get("Price").and_then(|p| p.as_u64());
     Ok(AliyunResult {
         avail,
         premium,
         price,
     })
+}
+
+fn parse_premium(value: Option<&serde_json::Value>) -> bool {
+    match value {
+        Some(serde_json::Value::Bool(b)) => *b,
+        Some(serde_json::Value::String(s)) => s.eq_ignore_ascii_case("true"),
+        _ => false,
+    }
 }
 
 #[cfg(test)]
@@ -197,5 +211,15 @@ mod tests {
             canonical,
             "Action=CheckDomain&DomainName=example.com&Format=JSON"
         );
+    }
+
+    #[test]
+    fn premium_accepts_bool_and_string() {
+        assert!(parse_premium(Some(&serde_json::json!(true))));
+        assert!(parse_premium(Some(&serde_json::json!("true"))));
+        assert!(parse_premium(Some(&serde_json::json!("True"))));
+        assert!(!parse_premium(Some(&serde_json::json!("false"))));
+        assert!(!parse_premium(Some(&serde_json::json!(false))));
+        assert!(!parse_premium(None));
     }
 }

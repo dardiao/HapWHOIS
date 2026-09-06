@@ -528,6 +528,40 @@ textarea.mini:focus {
   color: var(--muted);
 }
 
+.site-picker {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  background: #fafbfc;
+}
+
+.site-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin: 2px 0 8px;
+}
+
+.site-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+}
+
+.site-option input {
+  accent-color: var(--accent);
+  margin: 0;
+}
+
+.site-option strong {
+  color: var(--text);
+}
+
 .dict-preview {
   margin: 12px 0 0;
   max-height: 240px;

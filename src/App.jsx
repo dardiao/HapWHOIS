@@ -179,13 +179,21 @@ function aliyunBadge(item) {
       text: "阿里云·可注册",
       cls: "badge-avail",
       tip: item.aliyunPremium
-        ? `阿里云官方核验可注册（标记为溢价域名${item.aliyunPrice ? `，约 ¥${item.aliyunPrice}` : ""}）`
+        ? `阿里云官方核验可注册（标记为溢价域名${item.aliyunPrice ? `，参考价 ${item.aliyunPrice}` : ""}）`
         : "阿里云官方核验：可注册",
     };
   if (item.aliyunAvail === "0")
     return { text: "阿里云·已注册", cls: "badge-registered", tip: "阿里云官方核验：已被注册" };
   if (item.aliyunAvail === "-1")
     return { text: "阿里云·异常", cls: "badge-gray", tip: "阿里云返回查询异常，已回退本地 RDAP/WHOIS 判断" };
+  if (item.aliyunAvail === "3")
+    return { text: "阿里云·预注册", cls: "badge-warn", tip: "阿里云显示该域名可预注册，当前不能直接注册" };
+  if (item.aliyunAvail === "-2")
+    return { text: "阿里云·暂停", cls: "badge-gray", tip: "阿里云显示该域名注册服务暂停" };
+  if (item.aliyunAvail === "-3")
+    return { text: "阿里云·黑名单", cls: "badge-gray", tip: "阿里云显示该域名在黑名单中，不可注册" };
+  if (item.aliyunAvail)
+    return { text: "阿里云·其他", cls: "badge-gray", tip: `阿里云返回状态码 ${item.aliyunAvail}，已回退本地判断` };
   return {
     text: "阿里云·失败",
     cls: "badge-gray",
@@ -339,7 +347,7 @@ function ResultRow({ item }) {
         {item.available && item.aliyunPremium && (
           <div className="bcell bcell-avail">
             阿里云标记为溢价域名
-            {item.aliyunPrice ? `（约 ¥${item.aliyunPrice}）` : ""}，价格以注册商为准
+            {item.aliyunPrice ? `（参考价 ${item.aliyunPrice}）` : ""}，价格以注册商为准
           </div>
         )}
         {item.available && (
@@ -432,6 +440,7 @@ export default function App() {
     accessKey: "",
     secretSet: false,
     enabled: false,
+    site: "cn",
   });
   const [aliyunSecretInput, setAliyunSecretInput] = useState("");
   const [settingsMsg, setSettingsMsg] = useState("");
@@ -696,10 +705,15 @@ export default function App() {
         accessKey: aliyunView.accessKey.trim(),
         secret: aliyunSecretInput,
         enabled: aliyunView.enabled,
+        site: aliyunView.site,
       });
       setAliyunView(view);
       setAliyunSecretInput("");
-      setSettingsMsg("设置已保存，下次批量查询会自动调用阿里云核验");
+      setSettingsMsg(
+        `设置已保存，下次批量查询会调用${
+          aliyunView.site === "intl" ? "国际站" : "中国站"
+        }阿里云核验`,
+      );
     } catch (e) {
       setSettingsMsg(String(e));
     }
@@ -1195,33 +1209,87 @@ export default function App() {
               WHOIS/RDAP 是注册局原始数据，个别后缀（如 .de）会被限流或返回不准。
               配置阿里云后，每次批量查询会并发调用阿里云域名服务 CheckDomain
               官方接口复核，结果列新增「核验」，直接标注阿里云·可注册 / 已注册，
-              这是与阿里云网页查询同一数据源，误报最少。
+              与阿里云网页查询同一数据源，误报最少。
             </p>
+            <div className="site-picker">
+              <label className="mini-label">核验站点（决定可查后缀范围）</label>
+              <div className="site-options">
+                <label className="site-option">
+                  <input
+                    type="radio"
+                    name="aliyunSite"
+                    checked={aliyunView.site !== "intl"}
+                    onChange={() => setAliyunView({ ...aliyunView, site: "cn" })}
+                  />
+                  <strong>中国站</strong> aliyun.com（默认）
+                </label>
+                <label className="site-option">
+                  <input
+                    type="radio"
+                    name="aliyunSite"
+                    checked={aliyunView.site === "intl"}
+                    onChange={() => setAliyunView({ ...aliyunView, site: "intl" })}
+                  />
+                  <strong>国际站</strong> alibabacloud.com
+                </label>
+              </div>
+              <p className="desc">
+                aliyun.com 与 alibabacloud.com 是两个独立站点：账号、密钥、可查后缀互不相通。
+                国际站能查 .us / .de / .co.uk 等更多国家/地区后缀；选哪个站点，就要用哪个站点
+                RAM 账号里创建的 AccessKey，应用会调用对应端点（
+                <span className="mono">domain.aliyuncs.com</span> 或
+                <span className="mono">domain-intl.aliyuncs.com</span>）。
+              </p>
+            </div>
             <h4 className="settings-sub">普通账号如何开通（只需一次）</h4>
             <ol className="settings-steps">
+              {aliyunView.site === "intl" ? (
+                <>
+                  <li>
+                    先注册国际站账号：
+                    <span className="mono">https://account.alibabacloud.com</span>
+                    （邮箱注册，需要中国内地以外的手机号做安全验证）。中国站账号无法登录或迁移到国际站。
+                  </li>
+                  <li>
+                    用该账号登录国际站 RAM 控制台：
+                    <span className="mono">https://ram.console.alibabacloud.com/users</span>
+                    ，点「创建用户」，访问方式勾选 <strong>OpenAPI 调用访问</strong>。
+                  </li>
+                  <li>
+                    给该用户添加权限策略 <strong>AliyunDomainFullAccess</strong>；
+                    CheckDomain 免费，不产生费用。
+                  </li>
+                </>
+              ) : (
+                <>
+                  <li>
+                    用已实名认证的 aliyun.com 主账号登录中国站 RAM 控制台：
+                    <span className="mono">https://ram.console.aliyun.com/users</span>
+                    ——不需要单独“开通 RAM”。如果登录不了，请确认打开的是中国站控制台，且账号已完成实名认证。
+                  </li>
+                  <li>
+                    点「创建用户」，登录名随意（如 hapwhois），访问方式勾选{" "}
+                    <strong>OpenAPI 调用访问</strong>；创建成功后会显示 AccessKey ID
+                    和 AccessKey Secret（Secret 只显示这一次，务必先复制保存）。
+                  </li>
+                  <li>
+                    给该用户添加权限策略 <strong>AliyunDomainFullAccess</strong>；
+                    CheckDomain 免费，不产生费用。
+                  </li>
+                </>
+              )}
               <li>
-                用你的阿里云普通账号登录 RAM 控制台：
-                <span className="mono">https://ram.console.aliyun.com/users</span>
-                ——不需要单独“开通 RAM”服务，登录即可用。
-              </li>
-              <li>
-                点「创建用户」，登录名随意（如 hapwhois），访问方式勾选{" "}
-                <strong>OpenAPI 调用访问</strong>；创建成功后会显示 AccessKey ID
-                和 AccessKey Secret（Secret 只显示这一次，务必先复制保存）。
-              </li>
-              <li>
-                给该用户授权：添加权限策略 <strong>AliyunDomainFullAccess</strong>
-                （仅域名服务权限）。CheckDomain 免费，不产生费用。
-              </li>
-              <li>
-                把 AccessKey ID / Secret 填到下方保存。Secret 只在本机
+                回到本页把 AccessKey ID / Secret 填到下方保存。Secret 只在本机
                 <span className="mono"> ~/.hapwhois/settings.json </span>
                 留档（文件权限 600），之后密码框留空即表示沿用已保存的 Secret。
               </li>
             </ol>
             <p className="desc warn-text">
               安全提醒：Secret 相当于账号密码，请勿发给他人或提交到代码仓库；建议给
-              RAM 子账号（而非主账号）授权。账号级 QPS 约 10，应用内并发 6，不会触发限流。
+              RAM 子账号（而非主账号）授权。RAM 控制台必须和账号所在站点一致：
+              中国站账号去 <span className="mono">ram.console.aliyun.com</span>，
+              国际站账号去 <span className="mono">ram.console.alibabacloud.com</span>。
+              账号级 QPS 约 10，应用内并发 6，不会触发限流。
             </p>
 
             <div className="aliyun-form">

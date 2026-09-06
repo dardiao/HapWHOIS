@@ -44,6 +44,8 @@ pub struct AppSettings {
     pub aliyun_access_key: String,
     pub aliyun_secret: String,
     pub aliyun_enabled: bool,
+    /// "cn" = 中国站（aliyun.com）；"intl" = 国际站（alibabacloud.com）
+    pub aliyun_site: String,
 }
 
 #[derive(Serialize)]
@@ -52,6 +54,21 @@ struct AliyunSettingsView {
     access_key: String,
     secret_set: bool,
     enabled: bool,
+    site: String,
+}
+
+fn normalize_site(site: &str) -> String {
+    if site == "intl" { "intl".into() } else { "cn".into() }
+}
+
+fn aliyun_cfg_from(s: &AppSettings) -> Option<aliyun::AliyunConfig> {
+    (s.aliyun_enabled && !s.aliyun_access_key.is_empty() && !s.aliyun_secret.is_empty()).then(
+        || aliyun::AliyunConfig {
+            access_key: s.aliyun_access_key.clone(),
+            secret: s.aliyun_secret.clone(),
+            intl: s.aliyun_site == "intl",
+        },
+    )
 }
 
 /// 设置保存在 ~/.hapwhois/settings.json（Windows 为 %USERPROFILE%\.hapwhois\settings.json）
@@ -97,6 +114,7 @@ fn get_aliyun_settings() -> AliyunSettingsView {
         access_key: s.aliyun_access_key,
         secret_set: !s.aliyun_secret.is_empty(),
         enabled: s.aliyun_enabled,
+        site: normalize_site(&s.aliyun_site),
     }
 }
 
@@ -105,6 +123,7 @@ fn save_aliyun_settings(
     access_key: String,
     secret: String,
     enabled: bool,
+    site: String,
 ) -> Result<AliyunSettingsView, String> {
     let key = access_key.trim().to_string();
     if key.is_empty() {
@@ -120,11 +139,13 @@ fn save_aliyun_settings(
         return Err("AccessKey Secret 不能为空（如需更换，请先点“移除密钥”再填入）".into());
     }
     s.aliyun_enabled = enabled;
+    s.aliyun_site = normalize_site(&site);
     save_settings(&s)?;
     Ok(AliyunSettingsView {
         access_key: s.aliyun_access_key,
         secret_set: true,
         enabled: s.aliyun_enabled,
+        site: normalize_site(&s.aliyun_site),
     })
 }
 
@@ -134,11 +155,13 @@ fn remove_aliyun_settings() -> Result<AliyunSettingsView, String> {
     s.aliyun_access_key.clear();
     s.aliyun_secret.clear();
     s.aliyun_enabled = false;
+    s.aliyun_site = "cn".into();
     save_settings(&s)?;
     Ok(AliyunSettingsView {
         access_key: String::new(),
         secret_set: false,
         enabled: false,
+        site: "cn".into(),
     })
 }
 
@@ -148,6 +171,7 @@ async fn test_aliyun_settings() -> Result<aliyun::AliyunResult, String> {
     let cfg = aliyun::AliyunConfig {
         access_key: s.aliyun_access_key.clone(),
         secret: s.aliyun_secret.clone(),
+        intl: s.aliyun_site == "intl",
     };
     if !cfg.is_ready() {
         return Err("请先填写 AccessKey 与 Secret".into());
@@ -430,13 +454,7 @@ async fn lookup_batch(
     let total = parse_domains(domains.clone()).len();
     let _ = app.emit("lookup-start", serde_json::json!({ "total": total }));
     let settings = load_settings();
-    let aliyun_cfg = (settings.aliyun_enabled
-        && !settings.aliyun_access_key.is_empty()
-        && !settings.aliyun_secret.is_empty())
-    .then(|| aliyun::AliyunConfig {
-        access_key: settings.aliyun_access_key.clone(),
-        secret: settings.aliyun_secret.clone(),
-    });
+    let aliyun_cfg = aliyun_cfg_from(&settings);
     run_batch(
         |payload| {
             let _ = app.emit("lookup-progress", payload);
