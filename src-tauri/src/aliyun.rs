@@ -1,5 +1,6 @@
 //! 阿里云域名服务 CheckDomain API（官方可用性核验）。
-//! 文档：https://help.aliyun.com/zh/dws/developer-reference/api-domain-2018-01-29-checkdomain
+//! 中国站文档：https://help.aliyun.com/zh/dws/developer-reference/api-domain-2018-01-29-checkdomain
+//! 国际站（Domain-intl）对应 SDK 版本：2017-12-18
 
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
@@ -15,7 +16,10 @@ use sha1::Sha1;
 const ENDPOINT_CN: &str = "https://domain.aliyuncs.com/";
 /// 国际站（alibabacloud.com）域名服务 API 端点：可查的后缀范围更广
 const ENDPOINT_INTL: &str = "https://domain-intl.aliyuncs.com/";
-const VERSION: &str = "2018-01-29";
+/// 中国站（aliyun.com）API 版本
+const VERSION_CN: &str = "2018-01-29";
+/// 国际站（alibabacloud.com）Domain-intl API 版本
+const VERSION_INTL: &str = "2017-12-18";
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -113,17 +117,19 @@ fn shared_client() -> reqwest::Client {
         .clone()
 }
 
-/// 调用 CheckDomain 检查单个域名是否可注册。
-pub async fn check_domain(domain: &str, cfg: &AliyunConfig) -> Result<AliyunResult, String> {
-    if !cfg.is_ready() {
-        return Err("未配置阿里云 AccessKey".into());
-    }
-
+/// 对指定端点/版本发送一次签名请求，返回原始 JSON。
+/// 传输/解析失败返回 Err；接口业务错误（如 InvalidVersion）也放在 Ok(JSON) 里由调用方判断。
+async fn signed_request(
+    domain: &str,
+    cfg: &AliyunConfig,
+    endpoint: &str,
+    version: &str,
+) -> Result<serde_json::Value, String> {
     let mut params: BTreeMap<&str, String> = BTreeMap::new();
     params.insert("Action", "CheckDomain".into());
     params.insert("DomainName", domain.to_string());
     params.insert("Format", "JSON".into());
-    params.insert("Version", VERSION.into());
+    params.insert("Version", version.into());
     params.insert("AccessKeyId", cfg.access_key.clone());
     params.insert("SignatureMethod", "HMAC-SHA1".into());
     params.insert("SignatureVersion", "1.0".into());
@@ -139,7 +145,6 @@ pub async fn check_domain(domain: &str, cfg: &AliyunConfig) -> Result<AliyunResu
     let signature = hmac_sha1_base64(&format!("{}&", cfg.secret), &string_to_sign);
 
     let query = format!("{canonical}&Signature={}", percent_encode(&signature));
-    let endpoint = if cfg.intl { ENDPOINT_INTL } else { ENDPOINT_CN };
     let url = format!("{endpoint}?{query}");
 
     let resp = shared_client()
@@ -151,30 +156,58 @@ pub async fn check_domain(domain: &str, cfg: &AliyunConfig) -> Result<AliyunResu
         .json()
         .await
         .map_err(|e| format!("阿里云响应解析失败: {e}"))?;
+    Ok(raw)
+}
 
-    if let Some(code) = raw.get("Code").and_then(|c| c.as_str()) {
-        let msg = raw
-            .get("Message")
-            .and_then(|m| m.as_str())
-            .unwrap_or("未知错误");
-        return Err(format!("阿里云返回错误 {code}: {msg}"));
+/// 调用 CheckDomain 检查单个域名是否可注册。
+/// 站点对应的 API 版本若返回 InvalidVersion，自动换另一版本重试一次。
+pub async fn check_domain(domain: &str, cfg: &AliyunConfig) -> Result<AliyunResult, String> {
+    if !cfg.is_ready() {
+        return Err("未配置阿里云 AccessKey".into());
     }
 
-    let avail = raw
-        .get("Avail")
-        .map(|v| {
-            v.as_str()
-                .map(String::from)
-                .unwrap_or_else(|| v.to_string())
-        })
-        .unwrap_or_else(|| "-1".into());
-    let premium = parse_premium(raw.get("Premium"));
-    let price = raw.get("Price").and_then(|p| p.as_u64());
-    Ok(AliyunResult {
-        avail,
-        premium,
-        price,
-    })
+    // 优先用本站点版本；万一官方端点调整，再兜底试另一版本
+    let candidates: [(&str, &str); 2] = if cfg.intl {
+        [(ENDPOINT_INTL, VERSION_INTL), (ENDPOINT_INTL, VERSION_CN)]
+    } else {
+        [(ENDPOINT_CN, VERSION_CN), (ENDPOINT_CN, VERSION_INTL)]
+    };
+
+    for (endpoint, version) in candidates {
+        let raw = match signed_request(domain, cfg, endpoint, version).await {
+            Ok(raw) => raw,
+            Err(e) => return Err(e),
+        };
+
+        if let Some(code) = raw.get("Code").and_then(|c| c.as_str()) {
+            let msg = raw
+                .get("Message")
+                .and_then(|m| m.as_str())
+                .unwrap_or("未知错误");
+            if code == "InvalidVersion" {
+                // 换另一版本再试一次
+                continue;
+            }
+            return Err(format!("阿里云返回错误 {code}: {msg}"));
+        }
+
+        let avail = raw
+            .get("Avail")
+            .map(|v| {
+                v.as_str()
+                    .map(String::from)
+                    .unwrap_or_else(|| v.to_string())
+            })
+            .unwrap_or_else(|| "-1".into());
+        let premium = parse_premium(raw.get("Premium"));
+        let price = raw.get("Price").and_then(|p| p.as_u64());
+        return Ok(AliyunResult {
+            avail,
+            premium,
+            price,
+        });
+    }
+    Err("阿里云返回错误 InvalidVersion（两个候选版本均无效）".into())
 }
 
 fn parse_premium(value: Option<&serde_json::Value>) -> bool {
