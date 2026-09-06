@@ -168,7 +168,29 @@ function statusOf(item) {
   if (item.available) return { text: "可注册", cls: "badge-avail" };
   if (item.error?.includes("已停止")) return { text: "未执行", cls: "badge-gray" };
   if (item.error) return { text: "失败", cls: "badge-red" };
+  if (item.nsConflict) return { text: "待确认", cls: "badge-warn" };
   return { text: "被注册", cls: "badge-registered" };
+}
+
+function aliyunBadge(item) {
+  if (!item.aliyunAvail && !item.aliyunError) return null;
+  if (item.aliyunAvail === "1")
+    return {
+      text: "阿里云·可注册",
+      cls: "badge-avail",
+      tip: item.aliyunPremium
+        ? `阿里云官方核验可注册（标记为溢价域名${item.aliyunPrice ? `，约 ¥${item.aliyunPrice}` : ""}）`
+        : "阿里云官方核验：可注册",
+    };
+  if (item.aliyunAvail === "0")
+    return { text: "阿里云·已注册", cls: "badge-registered", tip: "阿里云官方核验：已被注册" };
+  if (item.aliyunAvail === "-1")
+    return { text: "阿里云·异常", cls: "badge-gray", tip: "阿里云返回查询异常，已回退本地 RDAP/WHOIS 判断" };
+  return {
+    text: "阿里云·失败",
+    cls: "badge-gray",
+    tip: item.aliyunError || "阿里云核验失败，已回退本地 RDAP/WHOIS 判断",
+  };
 }
 
 const csvEscape = (v) => {
@@ -186,18 +208,35 @@ function statusText(item) {
   if (item.available) return "可注册";
   if (item.error?.includes("已停止")) return "未执行";
   if (item.error) return "失败";
+  if (item.nsConflict) return "待确认";
   return "被注册";
+}
+
+function verifyText(item) {
+  const b = aliyunBadge(item);
+  if (b) return b.text.replace("阿里云·", "");
+  if (item.nsConflict && !item.available) return "待确认";
+  return "";
 }
 
 function buildHtmlReport(rows, counts) {
   const cls = (s) =>
-    s === "可注册" ? "avail" : s === "被注册" ? "reg" : s === "失败" ? "fail" : "stop";
+    s === "可注册"
+      ? "avail"
+      : s === "被注册"
+        ? "reg"
+        : s === "失败"
+          ? "fail"
+          : s === "待确认"
+            ? "warn"
+            : "stop";
   const trs = rows
     .map(
       (r) => `<tr class="${cls(r.status)}">
         <td>${htmlEscape(r.domain)}</td>
         <td>${htmlEscape(r.status)}</td>
         <td>${htmlEscape(r.source)}</td>
+        <td>${htmlEscape(r.verify)}</td>
         <td>${htmlEscape(r.registrar)}</td>
         <td>${htmlEscape(r.expiry)}</td>
         <td>${htmlEscape(r.whoisServer)}</td>
@@ -217,6 +256,7 @@ function buildHtmlReport(rows, counts) {
     .reg { color: #1a56db; }
     .avail { color: #047857; }
     .fail { color: #b42318; }
+    .warn { color: #b45309; }
     .stop { color: #6b7280; }
     table { border-collapse: collapse; width: 100%; font-size: 13px; }
     th, td { border: 1px solid #e3e5e8; padding: 6px 10px; text-align: left; }
@@ -228,13 +268,14 @@ function buildHtmlReport(rows, counts) {
   <h1>HapWHOIS 查询结果（共 ${counts.total} 个）</h1>
   <p class="summary">
     <span class="reg">${counts.registered} 被注册</span> ·
+    ${counts.conflict > 0 ? `<span class="warn">${counts.conflict} 待确认</span> ·` : ""}
     <span class="avail">${counts.available} 可注册</span> ·
     <span class="fail">${counts.failed} 失败</span> ·
     <span class="stop">${counts.stopped} 未执行</span>
   </p>
   <table>
     <thead>
-      <tr><th>域名</th><th>状态</th><th>数据源</th><th>注册商</th><th>到期时间</th><th>WHOIS 服务器</th><th>备注</th></tr>
+      <tr><th>域名</th><th>状态</th><th>数据源</th><th>核验</th><th>注册商</th><th>到期时间</th><th>WHOIS 服务器</th><th>备注</th></tr>
     </thead>
     <tbody>
 ${trs}
@@ -246,6 +287,7 @@ ${trs}
 
 function ResultRow({ item }) {
   const status = statusOf(item);
+  const aliyun = aliyunBadge(item);
   return (
     <div className="brow">
       <div className="brow-main">
@@ -256,6 +298,16 @@ function ResultRow({ item }) {
         <div className="bcell">
           <span className="bcell-label">数据源</span>
           {status.text === "未执行" ? "—" : sourceLabel(item)}
+        </div>
+        <div className="bcell bcell-verify">
+          <span className="bcell-label">核验</span>
+          {status.text === "未执行" || !aliyun ? (
+            "—"
+          ) : (
+            <span className={`badge ${aliyun.cls}`} title={aliyun.tip}>
+              {aliyun.text}
+            </span>
+          )}
         </div>
         <div className="bcell">
           <span className="bcell-label">注册商</span>
@@ -274,8 +326,28 @@ function ResultRow({ item }) {
             {item.error}
           </div>
         )}
+        {!item.error && item.aliyunError && (
+          <div className="bcell bcell-aliyun-note" title={item.aliyunError}>
+            阿里云核验失败，已回退本地查询：{item.aliyunError}
+          </div>
+        )}
+        {item.nsConflict && (
+          <div className="bcell bcell-conflict">
+            本地 WHOIS/RDAP 显示可注册，但域名已有 NS 记录——疑似已被注册，请以注册商或阿里云核验结果为准
+          </div>
+        )}
+        {item.available && item.aliyunPremium && (
+          <div className="bcell bcell-avail">
+            阿里云标记为溢价域名
+            {item.aliyunPrice ? `（约 ¥${item.aliyunPrice}）` : ""}，价格以注册商为准
+          </div>
+        )}
         {item.available && (
-          <div className="bcell bcell-avail">公网查询显示可注册，结果以注册商为准</div>
+          <div className="bcell bcell-avail">
+            {item.aliyunAvail === "1"
+              ? "阿里云官方核验显示可注册，结果以注册商为准"
+              : "公网查询显示可注册，结果以注册商为准"}
+          </div>
         )}
       </div>
       {(item.rdap || item.whoisRaw) && (
@@ -321,7 +393,7 @@ function ResultRow({ item }) {
 }
 
 export default function App() {
-  const [tab, setTab] = useState("query"); // query | dict
+  const [tab, setTab] = useState("query"); // query | dict | settings
 
   // ---- 批量查询 ----
   const [input, setInput] = useState("");
@@ -332,7 +404,7 @@ export default function App() {
   const [error, setError] = useState(null);
   const [resultMsg, setResultMsg] = useState("");
   const [useDnsDiscovery, setUseDnsDiscovery] = useState(true);
-  const [viewFilter, setViewFilter] = useState("all"); // all | available
+  const [viewFilter, setViewFilter] = useState("all"); // all | available | conflict
 
   const itemsRef = useRef([]);
   const pendingRef = useRef([]);
@@ -355,10 +427,25 @@ export default function App() {
   const [dictMsg, setDictMsg] = useState("");
   const [showAbout, setShowAbout] = useState(false);
   const [appVersion, setAppVersion] = useState("");
+  // ---- 阿里云核验设置 ----
+  const [aliyunView, setAliyunView] = useState({
+    accessKey: "",
+    secretSet: false,
+    enabled: false,
+  });
+  const [aliyunSecretInput, setAliyunSecretInput] = useState("");
+  const [settingsMsg, setSettingsMsg] = useState("");
+  const [testingAliyun, setTestingAliyun] = useState(false);
 
   useEffect(() => {
     getVersion()
       .then(setAppVersion)
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    invoke("get_aliyun_settings")
+      .then(setAliyunView)
       .catch(() => {});
   }, []);
 
@@ -603,12 +690,54 @@ export default function App() {
     resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
+  const saveAliyunSettings = async () => {
+    try {
+      const view = await invoke("save_aliyun_settings", {
+        accessKey: aliyunView.accessKey.trim(),
+        secret: aliyunSecretInput,
+        enabled: aliyunView.enabled,
+      });
+      setAliyunView(view);
+      setAliyunSecretInput("");
+      setSettingsMsg("设置已保存，下次批量查询会自动调用阿里云核验");
+    } catch (e) {
+      setSettingsMsg(String(e));
+    }
+  };
+
+  const testAliyun = async () => {
+    setTestingAliyun(true);
+    try {
+      const r = await invoke("test_aliyun_settings");
+      const text =
+        r.avail === "1" ? "可注册" : r.avail === "0" ? "已被注册" : "查询异常";
+      setSettingsMsg(
+        `连接成功：example.com → ${text}${r.premium ? "（阿里云标记为溢价）" : ""}`,
+      );
+    } catch (e) {
+      setSettingsMsg(String(e));
+    } finally {
+      setTestingAliyun(false);
+    }
+  };
+
+  const removeAliyun = async () => {
+    try {
+      const view = await invoke("remove_aliyun_settings");
+      setAliyunView(view);
+      setSettingsMsg("已移除阿里云密钥，核验已关闭");
+    } catch (e) {
+      setSettingsMsg(String(e));
+    }
+  };
+
   const exportResults = async (format) => {
     if (!items.length) return;
     const rows = items.map((it) => ({
       domain: it.domain,
       status: statusText(it),
       source: sourceLabel(it),
+      verify: verifyText(it),
       registrar: it.rdap?.registrar ?? "",
       expiry: it.rdap?.expirationDate ?? "",
       whoisServer: it.whoisServer ?? "",
@@ -616,7 +745,8 @@ export default function App() {
     }));
     const counts = {
       total: items.length,
-      registered: successCount,
+      registered: registeredCount,
+      conflict: conflictCount,
       available: availableCount,
       failed: failedCount,
       stopped: stoppedCount,
@@ -626,13 +756,22 @@ export default function App() {
     let ext = "";
     if (format === "csv") {
       ext = "csv";
-      const head = ["域名", "状态", "数据源", "注册商", "到期时间", "WHOIS 服务器", "备注"];
+      const head = ["域名", "状态", "数据源", "核验", "注册商", "到期时间", "WHOIS 服务器", "备注"];
       content =
         "\uFEFF" +
         [
           head,
           ...rows.map((r) =>
-            [r.domain, r.status, r.source, r.registrar, r.expiry, r.whoisServer, r.error]
+            [
+              r.domain,
+              r.status,
+              r.source,
+              r.verify,
+              r.registrar,
+              r.expiry,
+              r.whoisServer,
+              r.error,
+            ]
               .map(csvEscape)
               .join(","),
           ),
@@ -651,9 +790,15 @@ export default function App() {
     setResultMsg(`已导出 ${items.length} 条 → ${path}`);
   };
 
-  const shownItems = viewFilter === "available" ? items.filter((i) => i.available) : items;
+  const shownItems =
+    viewFilter === "available"
+      ? items.filter((i) => i.available)
+      : viewFilter === "conflict"
+        ? items.filter((i) => i.nsConflict)
+        : items;
   const availableCount = items.filter((i) => i.available).length;
-  const successCount = items.filter((i) => !i.error && !i.available).length;
+  const conflictCount = items.filter((i) => !i.available && i.nsConflict).length;
+  const registeredCount = items.filter((i) => !i.available && !i.nsConflict && !i.error).length;
   const failedCount = items.filter((i) => i.error && !i.error.includes("已停止")).length;
   const stoppedCount = items.filter((i) => i.error?.includes("已停止")).length;
 
@@ -673,6 +818,12 @@ export default function App() {
         </button>
         <button className={tab === "dict" ? "tab active" : "tab"} onClick={() => setTab("dict")}>
           字典生成{dict.length ? `（${dict.length}）` : ""}
+        </button>
+        <button
+          className={tab === "settings" ? "tab active" : "tab"}
+          onClick={() => setTab("settings")}
+        >
+          设置
         </button>
       </nav>
 
@@ -705,6 +856,17 @@ export default function App() {
             <div className="search-row">
               <p className="hint-left">
                 已识别 <strong>{domains.length}</strong> 个域名 · 并发 6 · 单域名超时 10s
+                {aliyunView.enabled && aliyunView.secretSet ? (
+                  " · 阿里云核验已开启"
+                ) : (
+                  <button
+                    type="button"
+                    className="link-inline"
+                    onClick={() => setTab("settings")}
+                  >
+                    · 阿里云核验未开启（去设置）
+                  </button>
+                )}
               </p>
               {phase === "loading" ? (
                 <button type="button" className="btn-stop" onClick={doStop}>
@@ -742,12 +904,23 @@ export default function App() {
             <div className="result-stack" ref={resultsRef}>
               <div className="summary">
                 共 {items.length} 个：
-                <span className="summary-registered">{successCount} 被注册</span>
+                <span className="summary-registered">{registeredCount} 被注册</span>
                 {failedCount > 0 && <span className="summary-fail">{failedCount} 失败</span>}
                 {stoppedCount > 0 && <span className="summary-stop">{stoppedCount} 未执行</span>}
                 {availableCount > 0 && (
                   <button className="summary-avail" onClick={showAvailableOnly}>
                     {availableCount} 个可注册 →
+                  </button>
+                )}
+                {conflictCount > 0 && (
+                  <button
+                    className="summary-conflict summary-clickable"
+                    onClick={() => {
+                      setViewFilter("conflict");
+                      resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+                    }}
+                  >
+                    {conflictCount} 个待确认 →
                   </button>
                 )}
                 {phase === "done" && !stoppedCount && (
@@ -770,6 +943,14 @@ export default function App() {
                       可注册（{availableCount}）
                     </button>
                   )}
+                  {conflictCount > 0 && (
+                    <button
+                      className={`btn-small ${viewFilter === "conflict" ? "btn-active" : ""}`}
+                      onClick={() => setViewFilter("conflict")}
+                    >
+                      待确认（{conflictCount}）
+                    </button>
+                  )}
                   <button type="button" className="btn-small" onClick={() => exportResults("csv")}>
                     导出 CSV
                   </button>
@@ -785,6 +966,7 @@ export default function App() {
                 <div className="brow brow-head brow-main">
                   <div className="bcell bcell-domain">域名</div>
                   <div className="bcell">数据源</div>
+                  <div className="bcell bcell-verify">核验</div>
                   <div className="bcell">注册商</div>
                   <div className="bcell">到期时间</div>
                   <div className="bcell">WHOIS 服务器</div>
@@ -799,7 +981,7 @@ export default function App() {
           {phase === "idle" && (
             <p className="hint">
               按域名后缀自动路由：.com/.net → Verisign，.cn → CNNIC，.io → Identity Digital……
-              RDAP 优先，传统 WHOIS 兜底
+              RDAP 优先，传统 WHOIS 兜底；可在「设置」里开启阿里云核验，可用性判断更准
             </p>
           )}
         </main>
@@ -1003,6 +1185,138 @@ export default function App() {
         </main>
       )}
 
+      {tab === "settings" && (
+        <main className="content settings-content">
+          <section className="dict-section">
+            <h3>
+              <span className="plan-badge">核验</span>阿里云域名可用性核验
+            </h3>
+            <p className="desc">
+              WHOIS/RDAP 是注册局原始数据，个别后缀（如 .de）会被限流或返回不准。
+              配置阿里云后，每次批量查询会并发调用阿里云域名服务 CheckDomain
+              官方接口复核，结果列新增「核验」，直接标注阿里云·可注册 / 已注册，
+              这是与阿里云网页查询同一数据源，误报最少。
+            </p>
+            <h4 className="settings-sub">普通账号如何开通（只需一次）</h4>
+            <ol className="settings-steps">
+              <li>
+                用你的阿里云普通账号登录 RAM 控制台：
+                <span className="mono">https://ram.console.aliyun.com/users</span>
+                ——不需要单独“开通 RAM”服务，登录即可用。
+              </li>
+              <li>
+                点「创建用户」，登录名随意（如 hapwhois），访问方式勾选{" "}
+                <strong>OpenAPI 调用访问</strong>；创建成功后会显示 AccessKey ID
+                和 AccessKey Secret（Secret 只显示这一次，务必先复制保存）。
+              </li>
+              <li>
+                给该用户授权：添加权限策略 <strong>AliyunDomainFullAccess</strong>
+                （仅域名服务权限）。CheckDomain 免费，不产生费用。
+              </li>
+              <li>
+                把 AccessKey ID / Secret 填到下方保存。Secret 只在本机
+                <span className="mono"> ~/.hapwhois/settings.json </span>
+                留档（文件权限 600），之后密码框留空即表示沿用已保存的 Secret。
+              </li>
+            </ol>
+            <p className="desc warn-text">
+              安全提醒：Secret 相当于账号密码，请勿发给他人或提交到代码仓库；建议给
+              RAM 子账号（而非主账号）授权。账号级 QPS 约 10，应用内并发 6，不会触发限流。
+            </p>
+
+            <div className="aliyun-form">
+              <label className="mini-label" htmlFor="akid">
+                AccessKey ID
+              </label>
+              <input
+                id="akid"
+                className="settings-input"
+                value={aliyunView.accessKey}
+                onChange={(e) =>
+                  setAliyunView({ ...aliyunView, accessKey: e.target.value })
+                }
+                placeholder="LTAI5t…"
+                spellCheck={false}
+                autoComplete="off"
+              />
+              <label className="mini-label" htmlFor="aksecret">
+                AccessKey Secret
+                {aliyunView.secretSet && (
+                  <span className="muted-inline">（已保存，留空保持不变）</span>
+                )}
+              </label>
+              <input
+                id="aksecret"
+                className="settings-input"
+                type="password"
+                value={aliyunSecretInput}
+                onChange={(e) => setAliyunSecretInput(e.target.value)}
+                placeholder={
+                  aliyunView.secretSet
+                    ? "已保存（留空则沿用）"
+                    : "输入 AccessKey Secret"
+                }
+                autoComplete="new-password"
+              />
+              <label className="suffix-toggle">
+                <input
+                  type="checkbox"
+                  checked={aliyunView.enabled}
+                  onChange={(e) =>
+                    setAliyunView({ ...aliyunView, enabled: e.target.checked })
+                  }
+                />
+                批量查询时启用阿里云核验
+              </label>
+              <div className="dict-actions">
+                <button
+                  type="button"
+                  className="btn-small btn-primary"
+                  onClick={saveAliyunSettings}
+                >
+                  保存设置
+                </button>
+                <button
+                  type="button"
+                  className="btn-small"
+                  onClick={testAliyun}
+                  disabled={
+                    testingAliyun ||
+                    (!aliyunView.secretSet && !aliyunSecretInput.trim())
+                  }
+                >
+                  {testingAliyun ? "测试中…" : "测试连接"}
+                </button>
+                {aliyunView.secretSet && (
+                  <button
+                    type="button"
+                    className="btn-small btn-danger"
+                    onClick={removeAliyun}
+                  >
+                    移除密钥
+                  </button>
+                )}
+              </div>
+              {settingsMsg && (
+                <p
+                  className={`dict-msg ${
+                    /失败|不能为空|错误|超时/.test(settingsMsg) ? "msg-error" : ""
+                  }`}
+                >
+                  {settingsMsg}
+                </p>
+              )}
+              <p className="desc">
+                关于准确性：GoDaddy / Namecheap / OVHcloud 等注册商的搜索框，实际也是在查
+                同一份注册局数据（RDAP/WHOIS），并没有更权威的独立公开接口，因此无需逐个接入；
+                阿里云 CheckDomain 与它们对“是否可注册”的事实一致，且对 .de 这类限流后缀
+                也按官方渠道核验，这就是“特别准确”的来源。
+              </p>
+            </div>
+          </section>
+        </main>
+      )}
+
       {showAbout && (
         <div className="modal-mask" onClick={() => setShowAbout(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
@@ -1011,7 +1325,9 @@ export default function App() {
             <p className="modal-version">v{appVersion || "0.3.0"}</p>
             <p className="engraved modal-copyright">© 2026 HapX™ · 保留所有权利</p>
             <p className="modal-tm">HapX™ 是 HapX 的注册商标</p>
-            <p className="modal-note">查询结果来自 RDAP / WHOIS 注册局，仅供参考。</p>
+            <p className="modal-note">
+              查询结果来自 RDAP / WHOIS 注册局及阿里云核验，仅供参考。
+            </p>
             <button type="button" className="btn-small" onClick={() => setShowAbout(false)}>
               关闭
             </button>

@@ -6,6 +6,10 @@
 - 批量查询：每行一个域名，自动去重、并发限流、逐域名结果
 - 按后缀自动路由 WHOIS 服务器：内置表优先，可开启
   `{后缀}.whois-servers.net` DNS 发现作为兜底（whoisthisdomain 同款机制）
+- 阿里云 CheckDomain 官方核验（可选）：结果列直接标注「阿里云·可注册 / 已注册」，
+  对 .de 等易限流/易误报的后缀尤其有效
+- DNS NS 交叉校验：本地 WHOIS/RDAP 提示可注册但域名已有 NS 记录时，标记「待确认」，
+  避免把已注册域名误报成可注册
 
 ## 技术栈
 
@@ -26,6 +30,7 @@ HapWHOIS/
 │   ├── src/lib.rs        # Tauri 命令入口（lookup）
 │   ├── src/rdap.rs       # RDAP 查询与解析
 │   ├── src/whois.rs      # 传统 WHOIS 查询（按 TLD 路由）
+│   ├── src/aliyun.rs     # 阿里云 CheckDomain 官方核验（RPC 签名）
 │   └── tauri.conf.json   # 窗口 / 打包配置
 ├── scripts/make-icon.mjs # 图标生成脚本（纯 Node，无依赖）
 └── .github/workflows/    # 跨平台打包 CI
@@ -69,9 +74,26 @@ cd src-tauri
 cargo test              # 需要联网，真实请求 RDAP / WHOIS
 ```
 
+## 阿里云核验（可选，推荐开启）
+
+App 内「设置」页配置一次即可，无需单独开通 RAM 产品，普通阿里云账号也能用：
+
+1. 登录 <https://ram.console.aliyun.com/users>（RAM 控制台，账号登录即可）；
+2. 「创建用户」→ 勾选 **OpenAPI 调用访问**，保存弹出的 AccessKey ID / Secret；
+3. 给该用户授权 **AliyunDomainFullAccess**；
+4. 回到 App「设置」填入并保存。CheckDomain 免费，无额外费用。
+
+设置只写本机 `~/.hapwhois/settings.json`（Windows 为
+`%USERPROFILE%\.hapwhois\settings.json`，Unix 权限 600）。
+
+> GoDaddy / Namecheap / OVHcloud 等注册商搜索框查的也是注册局数据
+> （RDAP/WHOIS），并不存在更权威的独立公开接口；阿里云 CheckDomain
+> 与它们基于同一份事实，且官方渠道不受 .de 等注册局限流影响。
+
 ## 已知限制
 
 - 传统 WHOIS 目前内置了常见 TLD（.com/.net/.org/.io 等）的服务器路由表；其余 TLD 依赖 RDAP（rdap.org 已覆盖绝大多数主流顶级域）。
+- 阿里云账号级 QPS 约 10，App 内并发上限 6，适合中批量查询。
 - 未做查询缓存与域名监控，可作为后续扩展。
 
 ## 版权

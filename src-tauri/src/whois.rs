@@ -101,6 +101,32 @@ async fn resolve_ips(host: &str) -> Result<Vec<std::net::IpAddr>, String> {
     Ok(response.iter().collect())
 }
 
+/// DNS 交叉校验（C）：域名是否已有 NS 记录。
+/// 已注册域名几乎都有 NS；当本地 WHOIS/RDAP 数据不可靠时，
+/// 用它佐证“疑似已注册”，避免把已注册域名误报成可注册。
+/// 只信 NS：部分运营商 DNS 会为不存在的域名返回通配 A 记录，
+/// 但通常不会伪造 NS，因此 NS 是最可靠的“已注册”证据。
+pub async fn has_dns_records(domain: &str) -> bool {
+    let resolver = match TokioResolver::builder_tokio() {
+        Ok(builder) => builder.build(),
+        Err(_) => return false,
+    };
+    let fut = async {
+        if let Ok(lookup) = resolver
+            .lookup(domain, hickory_resolver::proto::rr::RecordType::NS)
+            .await
+        {
+            if lookup.iter().next().is_some() {
+                return true;
+            }
+        }
+        false
+    };
+    tokio::time::timeout(Duration::from_secs(6), fut)
+        .await
+        .unwrap_or(false)
+}
+
 async fn connect(server: &str) -> Result<TcpStream, String> {
     let ips = resolve_ips(server).await?;
     let mut last_err = None;
@@ -194,8 +220,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dns_discovery_negative() {
-        assert!(dns_discover("zznotarealtld").await.is_none());
+    async fn unknown_tld_without_discovery_is_none() {
+        // 不开启 DNS 发现时，内置表没有的后缀不应返回服务器
+        assert!(resolve_server("example.zznotarealtld", false).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn dns_ns_evidence_registered_domain() {
+        assert!(has_dns_records("example.com").await);
+    }
+
+    #[tokio::test]
+    async fn dns_ns_evidence_unregistered_domain() {
+        // .invalid 是保留 TLD，一定没有 NS/A/AAAA 记录
+        assert!(!has_dns_records("example.invalid").await);
     }
 
     #[tokio::test]

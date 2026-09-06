@@ -128,6 +128,19 @@ input {
   color: var(--muted);
 }
 
+.link-inline {
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--accent);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.link-inline:hover {
+  text-decoration: underline;
+}
+
 .search-row button {
   height: 40px;
   padding: 0 22px;
@@ -195,6 +208,10 @@ input {
 
 .dict-content {
   max-width: 980px;
+}
+
+.settings-content {
+  max-width: 860px;
 }
 
 .suffix-section {
@@ -439,6 +456,62 @@ textarea.mini:focus {
   overflow-wrap: anywhere;
 }
 
+.msg-error {
+  color: #b42318;
+}
+
+.settings-sub {
+  margin: 16px 0 6px;
+  font-size: 13px;
+}
+
+.settings-steps {
+  margin: 0 0 8px;
+  padding-left: 20px;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 2;
+}
+
+.mono {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 11px;
+  background: #f0f1f3;
+  padding: 1px 5px;
+  border-radius: 5px;
+}
+
+.warn-text {
+  color: #b45309;
+}
+
+.aliyun-form {
+  margin-top: 2px;
+}
+
+.settings-input {
+  width: 100%;
+  height: 36px;
+  margin-top: 6px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 13px;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.settings-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+}
+
+.muted-inline {
+  font-weight: 400;
+  color: var(--muted);
+}
+
 .dict-preview {
   margin: 12px 0 0;
   max-height: 240px;
@@ -614,6 +687,23 @@ textarea.mini:focus {
   color: #1a56db;
 }
 
+.summary-conflict {
+  color: #b45309;
+}
+
+.summary-clickable {
+  border: none;
+  background: none;
+  padding: 0;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.summary-clickable:hover {
+  text-decoration: underline;
+}
+
 .summary-done {
   color: #087443;
   font-weight: 600;
@@ -719,7 +809,7 @@ textarea.mini:focus {
 .brow-main,
 .brow-head {
   display: grid;
-  grid-template-columns: minmax(160px, 1.4fr) 0.7fr 1.1fr 0.9fr 1.2fr;
+  grid-template-columns: minmax(150px, 1.2fr) 0.6fr 0.95fr 0.8fr 0.8fr 1.05fr;
   gap: 10px;
   align-items: center;
   padding: 10px 14px;
@@ -777,6 +867,20 @@ textarea.mini:focus {
   white-space: normal;
 }
 
+.bcell-conflict {
+  color: #b45309;
+  grid-column: 1 / -1;
+  font-size: 12px;
+  white-space: normal;
+}
+
+.bcell-aliyun-note {
+  color: #6b7280;
+  grid-column: 1 / -1;
+  font-size: 12px;
+  white-space: normal;
+}
+
 .brow-detail {
   border-top: 1px dashed #eef0f2;
 }
@@ -829,6 +933,11 @@ textarea.mini:focus {
 .badge-registered {
   background: #e8f0fe;
   color: #1a56db;
+}
+
+.badge-warn {
+  background: #fef3c7;
+  color: #b45309;
 }
 
 /* 阴刻（intaglio）文字效果：文字像刻进浅色表面 */

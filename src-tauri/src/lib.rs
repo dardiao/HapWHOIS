@@ -1,7 +1,8 @@
+mod aliyun;
 mod rdap;
 mod whois;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
 use tokio::sync::Semaphore;
@@ -28,6 +29,130 @@ pub struct BatchItem {
     whois_server: Option<String>,
     available: bool,
     error: Option<String>,
+    /// C：本地初步判定“可注册”，但域名已有 DNS NS/A 记录 → 存疑，不能显示可注册
+    ns_conflict: bool,
+    /// A：阿里云 CheckDomain 核验（"1" 可注册 / "0" 已注册 / "-1" 查询异常）
+    aliyun_avail: Option<String>,
+    aliyun_premium: Option<bool>,
+    aliyun_price: Option<u64>,
+    aliyun_error: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppSettings {
+    pub aliyun_access_key: String,
+    pub aliyun_secret: String,
+    pub aliyun_enabled: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AliyunSettingsView {
+    access_key: String,
+    secret_set: bool,
+    enabled: bool,
+}
+
+/// 设置保存在 ~/.hapwhois/settings.json（Windows 为 %USERPROFILE%\.hapwhois\settings.json）
+fn settings_path() -> Result<std::path::PathBuf, String> {
+    let home = std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .ok_or_else(|| "无法确定用户主目录".to_string())?;
+    Ok(std::path::PathBuf::from(home)
+        .join(".hapwhois")
+        .join("settings.json"))
+}
+
+fn load_settings() -> AppSettings {
+    let Ok(path) = settings_path() else {
+        return AppSettings::default();
+    };
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|raw| serde_json::from_str(&raw).ok())
+        .unwrap_or_default()
+}
+
+fn save_settings(settings: &AppSettings) -> Result<(), String> {
+    let path = settings_path()?;
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| format!("创建设置目录失败: {e}"))?;
+    }
+    let json =
+        serde_json::to_string_pretty(settings).map_err(|e| format!("序列化设置失败: {e}"))?;
+    std::fs::write(&path, json).map_err(|e| format!("写入设置失败: {e}"))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn get_aliyun_settings() -> AliyunSettingsView {
+    let s = load_settings();
+    AliyunSettingsView {
+        access_key: s.aliyun_access_key,
+        secret_set: !s.aliyun_secret.is_empty(),
+        enabled: s.aliyun_enabled,
+    }
+}
+
+#[tauri::command]
+fn save_aliyun_settings(
+    access_key: String,
+    secret: String,
+    enabled: bool,
+) -> Result<AliyunSettingsView, String> {
+    let key = access_key.trim().to_string();
+    if key.is_empty() {
+        return Err("AccessKey ID 不能为空，请到 RAM 控制台创建后填写".into());
+    }
+    let mut s = load_settings();
+    s.aliyun_access_key = key;
+    // 密码框留空 = 保留已保存的 Secret，避免每次保存都要重填
+    if !secret.trim().is_empty() {
+        s.aliyun_secret = secret.trim().to_string();
+    }
+    if s.aliyun_secret.is_empty() {
+        return Err("AccessKey Secret 不能为空（如需更换，请先点“移除密钥”再填入）".into());
+    }
+    s.aliyun_enabled = enabled;
+    save_settings(&s)?;
+    Ok(AliyunSettingsView {
+        access_key: s.aliyun_access_key,
+        secret_set: true,
+        enabled: s.aliyun_enabled,
+    })
+}
+
+#[tauri::command]
+fn remove_aliyun_settings() -> Result<AliyunSettingsView, String> {
+    let mut s = load_settings();
+    s.aliyun_access_key.clear();
+    s.aliyun_secret.clear();
+    s.aliyun_enabled = false;
+    save_settings(&s)?;
+    Ok(AliyunSettingsView {
+        access_key: String::new(),
+        secret_set: false,
+        enabled: false,
+    })
+}
+
+#[tauri::command]
+async fn test_aliyun_settings() -> Result<aliyun::AliyunResult, String> {
+    let s = load_settings();
+    let cfg = aliyun::AliyunConfig {
+        access_key: s.aliyun_access_key.clone(),
+        secret: s.aliyun_secret.clone(),
+    };
+    if !cfg.is_ready() {
+        return Err("请先填写 AccessKey 与 Secret".into());
+    }
+    aliyun::check_domain("example.com", &cfg).await
 }
 
 #[derive(Serialize, Clone)]
@@ -138,11 +263,115 @@ fn parse_domains(domains: Vec<String>) -> Vec<String> {
     list
 }
 
+/// 一次查询收集到的三个数据源（RDAP / WHOIS / 阿里云），并发发起
+struct Sources {
+    rdap: Option<rdap::RdapInfo>,
+    rdap_not_found: bool,
+    whois_raw: Option<String>,
+    whois_server: Option<String>,
+    whois_available: bool,
+}
+
+async fn gather_sources(
+    domain: &str,
+    use_dns_discovery: bool,
+    aliyun_cfg: Option<&aliyun::AliyunConfig>,
+) -> (
+    Sources,
+    Option<aliyun::AliyunResult>,
+    Option<String>,
+) {
+    let aliyun_fut = async {
+        match aliyun_cfg {
+            Some(cfg) if cfg.is_ready() => match aliyun::check_domain(domain, cfg).await {
+                Ok(res) => (Some(res), None),
+                Err(e) => (None, Some(e)),
+            },
+            _ => (None, None),
+        }
+    };
+    let (rdap_r, whois_r, (aliyun_res, aliyun_err)) = tokio::join!(
+        rdap::lookup(domain),
+        whois::lookup(domain, use_dns_discovery),
+        aliyun_fut
+    );
+
+    let (rdap, rdap_not_found) = match rdap_r {
+        Ok(info) => (Some(info), false),
+        Err(rdap::RdapError::NotFound) => (None, true),
+        Err(e) => {
+            eprintln!("RDAP 查询失败: {e}");
+            (None, false)
+        }
+    };
+    let (whois_raw, whois_server, whois_available) = match whois_r {
+        Ok(data) => (Some(data.text), Some(data.server), data.available),
+        Err(_) => (None, None, false),
+    };
+    (
+        Sources {
+            rdap,
+            rdap_not_found,
+            whois_raw,
+            whois_server,
+            whois_available,
+        },
+        aliyun_res,
+        aliyun_err,
+    )
+}
+
+/// 最终可注册判定：
+/// A. 阿里云 CheckDomain 权威结果优先（"1" 可注册、"0" 已注册）；
+/// C. 否则本地判定“可注册”前，先做 DNS NS/A 交叉校验：域名已有 DNS 记录，
+///    说明注册局/WHOIS 数据不可靠，改标“待确认”，避免误报可注册。
+async fn decide_available(
+    domain: &str,
+    s: &Sources,
+    aliyun: Option<&aliyun::AliyunResult>,
+) -> (bool, bool) {
+    if let Some(a) = aliyun {
+        match a.avail.as_str() {
+            "1" => return (true, false),
+            "0" => return (false, false),
+            _ => {}
+        }
+    }
+    // 本地判定可注册的两个候选来源（RDAP 有数据 → 已注册，跳过）
+    let provisional = s.rdap.is_none()
+        && (s.whois_available || (s.rdap_not_found && s.whois_raw.is_none()));
+    if !provisional {
+        return (false, false);
+    }
+    if whois::has_dns_records(domain).await {
+        (false, true)
+    } else {
+        (true, false)
+    }
+}
+
+fn stopped_item(domain: &str, note: &str) -> BatchItem {
+    BatchItem {
+        domain: domain.to_string(),
+        rdap: None,
+        whois_raw: None,
+        whois_server: None,
+        available: false,
+        error: Some(note.into()),
+        ns_conflict: false,
+        aliyun_avail: None,
+        aliyun_premium: None,
+        aliyun_price: None,
+        aliyun_error: None,
+    }
+}
+
 /// 批量查询核心：逐条完成后回调 emit 推送进度；并发受限流控制。
 async fn run_batch<F>(
     mut emit: F,
     domains: Vec<String>,
     use_dns_discovery: bool,
+    aliyun_cfg: Option<aliyun::AliyunConfig>,
 ) -> Result<Vec<BatchItem>, String>
 where
     F: FnMut(ProgressPayload),
@@ -160,12 +389,13 @@ where
 
     for (index, domain) in list.into_iter().enumerate() {
         let sem = semaphore.clone();
+        let cfg = aliyun_cfg.clone();
         tasks.spawn(async move {
             let _permit = sem
                 .acquire()
                 .await
                 .expect("信号量被关闭");
-            let item = query_one(&domain, use_dns_discovery).await;
+            let item = query_one(&domain, use_dns_discovery, cfg.as_ref()).await;
             (index, item)
         });
     }
@@ -199,65 +429,72 @@ async fn lookup_batch(
 ) -> Result<Vec<BatchItem>, String> {
     let total = parse_domains(domains.clone()).len();
     let _ = app.emit("lookup-start", serde_json::json!({ "total": total }));
+    let settings = load_settings();
+    let aliyun_cfg = (settings.aliyun_enabled
+        && !settings.aliyun_access_key.is_empty()
+        && !settings.aliyun_secret.is_empty())
+    .then(|| aliyun::AliyunConfig {
+        access_key: settings.aliyun_access_key.clone(),
+        secret: settings.aliyun_secret.clone(),
+    });
     run_batch(
         |payload| {
             let _ = app.emit("lookup-progress", payload);
         },
         domains,
         use_dns_discovery,
+        aliyun_cfg,
     )
     .await
 }
 
-async fn query_one(domain: &str, use_dns_discovery: bool) -> BatchItem {
+async fn query_one(
+    domain: &str,
+    use_dns_discovery: bool,
+    aliyun_cfg: Option<&aliyun::AliyunConfig>,
+) -> BatchItem {
     if cancel_flag().load(Ordering::Relaxed) {
-        return BatchItem {
-            domain: domain.to_string(),
-            rdap: None,
-            whois_raw: None,
-            whois_server: None,
-            available: false,
-            error: Some("已停止（未执行）".into()),
-        };
+        return stopped_item(domain, "已停止（未执行）");
     }
 
-    let (rdap, whois) =
-        tokio::join!(rdap::lookup(domain), whois::lookup(domain, use_dns_discovery));
+    let (s, aliyun_res, aliyun_err) = gather_sources(domain, use_dns_discovery, aliyun_cfg).await;
     if cancel_flag().load(Ordering::Relaxed) {
-        return BatchItem {
-            domain: domain.to_string(),
-            rdap: None,
-            whois_raw: None,
-            whois_server: None,
-            available: false,
-            error: Some("已停止".into()),
-        };
+        return stopped_item(domain, "已停止");
     }
-    let (rdap, rdap_not_found) = match rdap {
-        Ok(info) => (Some(info), false),
-        Err(rdap::RdapError::NotFound) => (None, true),
-        Err(e) => {
-            eprintln!("RDAP 查询失败: {e}");
-            (None, false)
+
+    let (available, ns_conflict) = decide_available(domain, &s, aliyun_res.as_ref()).await;
+
+    let aliyun_registered = matches!(
+        aliyun_res.as_ref().map(|a| a.avail.as_str()),
+        Some("0")
+    );
+    let error = if !available
+        && !ns_conflict
+        && !aliyun_registered
+        && s.rdap.is_none()
+        && s.whois_raw.is_none()
+    {
+        let mut msg = "RDAP 与 WHOIS 均未返回结果".to_string();
+        if let Some(e) = &aliyun_err {
+            msg.push_str(&format!("；阿里云核验失败：{e}"));
         }
-    };
-    let (whois_raw, whois_server, whois_available) = match whois {
-        Ok(data) => (Some(data.text), Some(data.server), data.available),
-        Err(_) => (None, None, false),
-    };
-    let available = whois_available || (rdap_not_found && whois_raw.is_none());
-    let error = if !available && rdap.is_none() && whois_raw.is_none() {
-        Some("RDAP 与 WHOIS 均未返回结果".into())
+        Some(msg)
     } else {
         None
     };
+
     BatchItem {
         domain: domain.to_string(),
-        rdap,
-        whois_raw,
-        whois_server,
+        rdap: s.rdap,
+        whois_raw: s.whois_raw,
+        whois_server: s.whois_server,
         available,
         error,
+        ns_conflict,
+        aliyun_avail: aliyun_res.as_ref().map(|a| a.avail.clone()),
+        aliyun_premium: aliyun_res.as_ref().map(|a| a.premium),
+        aliyun_price: aliyun_res.as_ref().and_then(|a| a.price),
+        aliyun_error: aliyun_err,
     }
 }
 
@@ -323,7 +560,11 @@ pub fn run() {
             lookup_batch,
             cancel_lookup,
             write_dict_file,
-            read_dict_file
+            read_dict_file,
+            get_aliyun_settings,
+            save_aliyun_settings,
+            remove_aliyun_settings,
+            test_aliyun_settings
         ])
         .run(tauri::generate_context!())
         .expect("运行 HapWHOIS 失败");
@@ -350,6 +591,7 @@ mod tests {
             },
             vec!["example.com".into(), "example.com".into(), "example.org".into()],
             true,
+            None,
         )
         .await
         .expect("批量查询失败");
