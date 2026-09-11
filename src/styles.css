@@ -72,8 +72,9 @@ input {
 }
 
 .content {
-  max-width: 760px;
-  margin: 0 auto;
+  width: 100%;
+  max-width: none;
+  margin: 0;
   padding: 28px 24px;
 }
 
@@ -220,14 +221,6 @@ input {
   color: var(--accent);
   font-weight: 600;
   border-bottom-color: var(--accent);
-}
-
-.dict-content {
-  max-width: 980px;
-}
-
-.settings-content {
-  max-width: 860px;
 }
 
 .suffix-section {
