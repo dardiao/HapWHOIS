@@ -150,6 +150,18 @@ function formatElapsed(seconds) {
   return `${m}:${s}`;
 }
 
+function formatBytes(bytes) {
+  if (!bytes || bytes <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  let value = bytes;
+  let index = 0;
+  while (value >= 1024 && index < units.length - 1) {
+    value /= 1024;
+    index += 1;
+  }
+  return `${value.toFixed(index === 0 || value >= 100 ? 0 : 1)} ${units[index]}`;
+}
+
 function sourceLabel(item) {
   const rdap = !!item.rdap;
   const whois = !!item.whoisRaw;
@@ -445,6 +457,13 @@ export default function App() {
   const [aliyunSecretInput, setAliyunSecretInput] = useState("");
   const [settingsMsg, setSettingsMsg] = useState("");
   const [testingAliyun, setTestingAliyun] = useState(false);
+  // ---- 在线更新 ----
+  const [updateInfo, setUpdateInfo] = useState(null);
+  const [updatePhase, setUpdatePhase] = useState("idle"); // idle|checking|available|latest|downloading|installing|error
+  const [updateMsg, setUpdateMsg] = useState("");
+  const [updateProgress, setUpdateProgress] = useState({ downloaded: 0, total: 0, speedBps: 0 });
+  const [showUpdate, setShowUpdate] = useState(false);
+  const updateUnlisten = useRef(null);
 
   useEffect(() => {
     getVersion()
@@ -744,6 +763,92 @@ export default function App() {
       setSettingsMsg(String(e));
     }
   };
+
+  const openReleasePage = useCallback(async () => {
+    try {
+      await invoke("open_release_page", {
+        url: updateInfo?.releaseUrl || "https://github.com/dardiao/HapWHOIS/releases",
+      });
+    } catch (e) {
+      setUpdateMsg(String(e));
+      setUpdatePhase("error");
+    }
+  }, [updateInfo]);
+
+  const checkForUpdate = useCallback(
+    async (manual = true) => {
+      if (updatePhase === "checking" || updatePhase === "downloading" || updatePhase === "installing") {
+        return;
+      }
+      setUpdatePhase("checking");
+      setUpdateMsg(manual ? "正在检查更新…" : "");
+      try {
+        const info = await invoke("check_update");
+        setUpdateInfo(info);
+        if (info.available) {
+          setUpdatePhase("available");
+          setShowUpdate(true);
+        } else {
+          setUpdatePhase("latest");
+          if (manual) setUpdateMsg(`当前已是最新版本（v${info.currentVersion}）`);
+        }
+      } catch (e) {
+        setUpdatePhase("error");
+        setUpdateMsg(String(e));
+      }
+    },
+    [updatePhase],
+  );
+
+  const startUpdate = useCallback(async () => {
+    if (!updateInfo?.available) return;
+    if (updateInfo.manualOnly) {
+      openReleasePage();
+      return;
+    }
+    setUpdatePhase("downloading");
+    setUpdateMsg("");
+    setUpdateProgress({ downloaded: 0, total: updateInfo.assetSize, speedBps: 0 });
+    try {
+      const path = await invoke("download_update", {
+        url: updateInfo.assetUrl,
+        name: updateInfo.assetName,
+      });
+      setUpdatePhase("installing");
+      setUpdateMsg("下载完成，正在退出并安装新版本，稍后会自动重新打开…");
+      await invoke("install_update", { path });
+    } catch (e) {
+      setUpdatePhase("error");
+      setUpdateMsg(String(e));
+    }
+  }, [updateInfo, openReleasePage]);
+
+  useEffect(() => {
+    let cancelled = false;
+    listen("update-progress", (event) => {
+      if (!cancelled) setUpdateProgress(event.payload);
+    })
+      .then((un) => {
+        if (cancelled) un();
+        else updateUnlisten.current = un;
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+      try {
+        updateUnlisten.current?.();
+      } catch {
+        // 忽略
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    // 启动 4 秒后静默检查一次，有更新才弹窗（与 HapCLI 行为一致）
+    const timer = setTimeout(() => checkForUpdate(false), 4000);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const exportResults = async (format) => {
     if (!items.length) return;
@@ -1382,7 +1487,131 @@ export default function App() {
               </p>
             </div>
           </section>
+
+          <section className="dict-section update-section">
+            <h3>
+              <span className="plan-badge">更新</span>软件更新
+            </h3>
+            <p className="desc">
+              与 HapCLI 相同的更新流程：启动后自动检查 GitHub Releases，也可以手动检查；
+              发现新版本后在应用内下载，自动替换安装并重新打开。
+            </p>
+            <div className="update-row">
+              <span className="desc">当前版本 v{appVersion || "—"}</span>
+              <button
+                type="button"
+                className="btn-small btn-primary"
+                onClick={() => checkForUpdate(true)}
+                disabled={updatePhase === "checking" || updatePhase === "downloading"}
+              >
+                {updatePhase === "checking" ? "检查中…" : "检查更新"}
+              </button>
+              {updateInfo?.available && (
+                <button
+                  type="button"
+                  className="btn-small btn-export-query"
+                  onClick={() => setShowUpdate(true)}
+                >
+                  有新版本 v{updateInfo.latestVersion}
+                </button>
+              )}
+              <button type="button" className="btn-small" onClick={openReleasePage}>
+                打开发布页
+              </button>
+            </div>
+            {updateMsg && (
+              <p className={`dict-msg ${updatePhase === "error" ? "msg-error" : ""}`}>
+                {updateMsg}
+              </p>
+            )}
+          </section>
         </main>
+      )}
+
+      {showUpdate && updateInfo && (
+        <div
+          className="modal-mask"
+          onClick={() => {
+            if (updatePhase !== "downloading" && updatePhase !== "installing") {
+              setShowUpdate(false);
+            }
+          }}
+        >
+          <div className="modal modal-wide" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-logo">H</div>
+            <h2>
+              {updateInfo.available ? `发现新版本 v${updateInfo.latestVersion}` : "已是最新版本"}
+            </h2>
+            <p className="modal-version">
+              当前版本 v{updateInfo.currentVersion}
+              {updateInfo.publishedAt ? ` · 发布 ${formatDate(updateInfo.publishedAt)}` : ""}
+            </p>
+            {updateInfo.notes ? (
+              <pre className="update-notes">{updateInfo.notes}</pre>
+            ) : (
+              <p className="modal-note">该版本没有提供更新说明。</p>
+            )}
+            {updatePhase === "downloading" && (
+              <div className="update-progress">
+                <div className="progress-bar-wrap">
+                  <div
+                    className="progress-bar"
+                    style={{
+                      width: `${
+                        updateProgress.total
+                          ? Math.round((updateProgress.downloaded / updateProgress.total) * 100)
+                          : 10
+                      }%`,
+                    }}
+                  />
+                </div>
+                <p className="progress-text">
+                  {formatBytes(updateProgress.downloaded)} /{" "}
+                  {updateProgress.total ? formatBytes(updateProgress.total) : "大小未知"}
+                  {updateProgress.speedBps
+                    ? ` · ${formatBytes(updateProgress.speedBps)}/s`
+                    : ""}
+                </p>
+              </div>
+            )}
+            {updateMsg && (
+              <p className={`update-msg ${updatePhase === "error" ? "msg-error" : ""}`}>
+                {updateMsg}
+              </p>
+            )}
+            <div className="modal-actions">
+              {updatePhase === "downloading" || updatePhase === "installing" ? (
+                <button type="button" className="btn-small" disabled>
+                  {updatePhase === "downloading" ? "下载中…" : "安装中…"}
+                </button>
+              ) : updateInfo.available ? (
+                <>
+                  <button type="button" className="btn-small btn-primary" onClick={startUpdate}>
+                    {updateInfo.manualOnly ? "打开下载页" : "下载并安装"}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-small"
+                    onClick={() => setShowUpdate(false)}
+                  >
+                    稍后
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  className="btn-small"
+                  onClick={() => setShowUpdate(false)}
+                >
+                  关闭
+                </button>
+              )}
+              <button type="button" className="btn-small" onClick={openReleasePage}>
+                打开发布页
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {showAbout && (

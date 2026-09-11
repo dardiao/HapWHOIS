@@ -1,5 +1,6 @@
 mod aliyun;
 mod rdap;
+mod update;
 mod whois;
 
 use serde::{Deserialize, Serialize};
@@ -582,7 +583,11 @@ pub fn run() {
             get_aliyun_settings,
             save_aliyun_settings,
             remove_aliyun_settings,
-            test_aliyun_settings
+            test_aliyun_settings,
+            update::check_update,
+            update::download_update,
+            update::install_update,
+            update::open_release_page
         ])
         .run(tauri::generate_context!())
         .expect("运行 HapWHOIS 失败");

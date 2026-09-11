@@ -97,6 +97,19 @@ RAM 账号里创建的 AccessKey。无需单独开通 RAM 产品，普通账号�
 > （RDAP/WHOIS），并不存在更权威的独立公开接口；阿里云 CheckDomain
 > 与它们基于同一份事实，且官方渠道不受 .de 等注册局限流影响。
 
+## 在线更新
+
+与 HapCLI 相同的更新流程：应用启动 4 秒后自动检查
+[GitHub Releases](https://github.com/dardiao/HapWHOIS/releases)，也可以在
+「设置 → 软件更新」里手动检查。发现新版本后应用内下载（显示进度与速度），
+完成后自动替换安装并重新打开。
+
+- macOS：优先下载 Release 里的 `HapWHOIS_<版本>_aarch64.app.zip`（CI 自动产出），
+  缺失时回退到 `.dmg`；解压到临时目录后由后台脚本替换当前 `.app` 并重启；
+- Windows：下载 `HapWHOIS_<版本>_x64-setup.exe`，退出应用后以 `/S` 静默安装并重新启动；
+- 更新源是公开仓库的匿名 GitHub API 调用，不做签名校验（与 HapCLI 一致）；
+- 首个带更新功能的版本需要手动安装一次，之后即可在应用内完成更新。
+
 ## 已知限制
 
 - 传统 WHOIS 目前内置了常见 TLD（.com/.net/.org/.io 等）的服务器路由表；其余 TLD 依赖 RDAP（rdap.org 已覆盖绝大多数主流顶级域）。
