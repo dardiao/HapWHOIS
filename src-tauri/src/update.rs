@@ -357,6 +357,29 @@ pub async fn install_update(app: AppHandle, path: String) -> Result<(), String> 
     }
     let exe = std::env::current_exe().map_err(|e| format!("定位当前程序失败：{e}"))?;
 
+    // 保护：开发版（cargo run / target/debug）不在 .app 包内，替换逻辑会误删开发目录
+    #[cfg(target_os = "macos")]
+    {
+        let bundle = exe
+            .parent()
+            .and_then(|p| p.parent())
+            .and_then(|p| p.parent());
+        let is_app_bundle = bundle
+            .and_then(|p| p.extension())
+            .map(|ext| ext == "app")
+            .unwrap_or(false);
+        if !is_app_bundle {
+            return Err("当前运行的是开发版（不在 HapWHOIS.app 内），请到发布页下载正式版安装".into());
+        }
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let path_text = exe.to_string_lossy().to_lowercase();
+        if path_text.contains("\\target\\debug\\") || path_text.contains("\\target\\release\\") {
+            return Err("当前运行的是开发版，请到发布页下载正式版安装".into());
+        }
+    }
+
     #[cfg(target_os = "macos")]
     install_macos(&file, &exe)?;
     #[cfg(target_os = "windows")]

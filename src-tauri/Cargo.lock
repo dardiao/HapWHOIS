@@ -1279,7 +1279,7 @@ dependencies = [
 
 [[package]]
 name = "hapwhois"
-version = "0.3.7"
+version = "0.3.8"
 dependencies = [
  "base64 0.22.1",
  "hickory-resolver",
