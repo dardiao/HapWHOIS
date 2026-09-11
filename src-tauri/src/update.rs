@@ -80,17 +80,19 @@ pub fn is_newer(candidate: &str, current: &str) -> bool {
 fn pick_asset(assets: &[GhAsset]) -> Option<GhAsset> {
     let os = std::env::consts::OS;
     let arch = std::env::consts::ARCH;
-    let arch_key = match arch {
-        "aarch64" => "aarch64",
-        "x86_64" => "x64",
-        other => other,
+    // 同一架构在不同工具链下的叫法不一致（uname -m 会给 arm64 / x86_64）
+    let arch_keys: &[&str] = match arch {
+        "aarch64" => &["aarch64", "arm64"],
+        "x86_64" => &["x86_64", "x64", "amd64"],
+        other => &[other],
     };
     let suffixes: &[&str] = match os {
         "macos" => &[".app.zip", ".dmg"],
         "windows" => &["-setup.exe", ".msi"],
         _ => &[],
     };
-    let matches_arch = |name: &str| name.contains(arch_key) || name.contains(arch);
+    let matches_arch =
+        |name: &str| arch_keys.iter().any(|key| name.contains(key)) || name.contains(arch);
     for suffix in suffixes {
         if let Some(asset) = assets
             .iter()
@@ -446,6 +448,29 @@ mod tests {
         );
     }
 
+    #[test]
+    fn matches_arm64_alias() {
+        if !cfg!(target_os = "macos") {
+            return;
+        }
+        let assets = vec![
+            GhAsset {
+                name: "HapWHOIS_0.3.8_aarch64.dmg".into(),
+                browser_download_url: "https://example.invalid/a.dmg".into(),
+                size: 1,
+            },
+            GhAsset {
+                name: "HapWHOIS_0.3.8_arm64.app.zip".into(),
+                browser_download_url: "https://example.invalid/a.zip".into(),
+                size: 2,
+            },
+        ];
+        assert_eq!(
+            pick_asset(&assets).map(|a| a.name).unwrap_or_default(),
+            "HapWHOIS_0.3.8_arm64.app.zip"
+        );
+    }
+
     #[tokio::test]
     async fn checks_latest_release_from_github() {
         let info = check_update().await.expect("检查更新失败");
@@ -454,5 +479,13 @@ mod tests {
             info.current_version, info.latest_version, info.available, info.asset_name, info.manual_only
         );
         assert!(!info.latest_version.is_empty());
+        assert!(!info.asset_name.is_empty(), "应能选中当前平台的安装包");
+        if cfg!(target_os = "macos") {
+            assert!(
+                info.asset_name.ends_with(".app.zip") || info.asset_name.ends_with(".dmg"),
+                "意外的 macOS 安装包：{}",
+                info.asset_name
+            );
+        }
     }
 }
